@@ -288,6 +288,25 @@ export class TPSLinterSettingTab extends PluginSettingTab {
 
     if (this.plugin.settings.normalizeHeadingLevels) {
       new Setting(parent)
+        .setName("Push heading hierarchy down to H6")
+        .setDesc("Move the complete ATX heading outline down so its deepest nested level is H6. A standalone heading becomes H6 while parent and sibling relationships stay intact.")
+        .addToggle((toggle) => {
+          toggle
+            .setValue(this.plugin.settings.pushHeadingHierarchyToH6)
+            .onChange(async (value) => {
+              this.plugin.settings.pushHeadingHierarchyToH6 = value;
+              await this.plugin.saveSettings();
+              this.display();
+              this.focusSettingControl("Push heading hierarchy down to H6");
+            });
+        });
+    }
+
+    if (
+      this.plugin.settings.normalizeHeadingLevels &&
+      !this.plugin.settings.pushHeadingHierarchyToH6
+    ) {
+      new Setting(parent)
         .setName("First heading level")
         .setDesc("Use H1 for normal notes or H2 when another system owns the page title.")
         .addDropdown((dropdown) => {

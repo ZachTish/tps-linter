@@ -18,7 +18,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.2.0",
+    version: "0.3.0",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with explicit, ownership-safe actions.",
     author: "Zach Tisherman",
@@ -33,6 +33,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(versions, {
     "0.1.0": "1.10.0",
     "0.2.0": "1.10.0",
+    "0.3.0": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);

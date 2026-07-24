@@ -41,6 +41,7 @@ export interface MarkdownCleanupOptions {
   ensureFinalNewline: boolean;
   headingCapitalizationStyle: HeadingCapitalizationStyle;
   normalizeHeadingLevels: boolean;
+  pushHeadingHierarchyToH6: boolean;
   headingStartLevel: 1 | 2;
   sortFrontmatterFields: boolean;
   frontmatterPriorityKeys: readonly string[];
@@ -75,6 +76,7 @@ interface LineToken {
 
 interface ProcessedLineToken extends LineToken {
   protected: boolean;
+  headingIndex?: number;
 }
 
 interface FenceState {
@@ -85,6 +87,10 @@ interface FenceState {
 interface NormalizedHeadingLevel {
   source: number;
   target: number;
+}
+
+interface VisibleHeading {
+  sourceLevel: number;
 }
 
 type RawProtectedTag = "pre" | "textarea" | "script" | "style";
@@ -350,6 +356,9 @@ export function cleanMarkdown(
   let rawTag: RawProtectedTag | null = null;
   let inTemplater = false;
   const headingHierarchy: NormalizedHeadingLevel[] = [];
+  const visibleHeadings: VisibleHeading[] = [];
+  const pushHeadingHierarchyToH6 =
+    options.normalizeHeadingLevels && options.pushHeadingHierarchyToH6;
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
@@ -438,9 +447,14 @@ export function cleanMarkdown(
     }
 
     const heading = readAtxHeading(token.body);
+    let headingIndex: number | undefined;
     if (heading) {
       let nextLevel = heading.level;
-      if (options.normalizeHeadingLevels) {
+      if (pushHeadingHierarchyToH6) {
+        headingIndex = visibleHeadings.push({
+          sourceLevel: heading.level,
+        }) - 1;
+      } else if (options.normalizeHeadingLevels) {
         nextLevel = normalizeHeadingLevel(
           heading.level,
           options.headingStartLevel,
@@ -462,7 +476,7 @@ export function cleanMarkdown(
     const commentState = scanCommentConstructs(comparisonBody, null);
     if (commentState.protected) {
       comment = commentState.comment;
-      processedTokens.push({ ...token, protected: true });
+      processedTokens.push({ ...token, protected: true, headingIndex });
       continue;
     }
 
@@ -474,7 +488,7 @@ export function cleanMarkdown(
     if (protectedState.protected) {
       rawTag = protectedState.rawTag;
       inTemplater = protectedState.inTemplater;
-      processedTokens.push({ ...token, protected: true });
+      processedTokens.push({ ...token, protected: true, headingIndex });
       continue;
     }
 
@@ -498,7 +512,23 @@ export function cleanMarkdown(
       }
     }
 
-    processedTokens.push({ ...token, protected: false });
+    processedTokens.push({ ...token, protected: false, headingIndex });
+  }
+
+  if (pushHeadingHierarchyToH6 && visibleHeadings.length > 0) {
+    const targetLevels = bottomAlignHeadingLevels(
+      visibleHeadings.map((heading) => heading.sourceLevel),
+    );
+    for (const token of processedTokens) {
+      if (token.headingIndex === undefined) continue;
+      const heading = readAtxHeading(token.body);
+      const targetLevel = targetLevels[token.headingIndex];
+      if (!heading || targetLevel === undefined || targetLevel === heading.level) {
+        continue;
+      }
+      token.body = `${heading.indent}${"#".repeat(targetLevel)}${heading.separator}${heading.text}${heading.closing}`;
+      changes.headingLevelsAdjusted += 1;
+    }
   }
 
   const retainedTokens: ProcessedLineToken[] = [];
@@ -675,6 +705,28 @@ function normalizeHeadingLevel(
     (parent ? Math.min(6, parent.target + 1) : startLevel);
   hierarchy.push({ source: sourceLevel, target });
   return target;
+}
+
+function bottomAlignHeadingLevels(sourceLevels: readonly number[]): number[] {
+  const stack: number[] = [];
+  const depths: number[] = [];
+
+  for (let index = 0; index < sourceLevels.length; index += 1) {
+    const sourceLevel = sourceLevels[index];
+    if (sourceLevel === undefined) continue;
+    while (
+      stack.length > 0 &&
+      (sourceLevels[stack.at(-1) ?? -1] ?? 0) >= sourceLevel
+    ) {
+      stack.pop();
+    }
+    depths.push(stack.length);
+    stack.push(index);
+  }
+
+  const deepestLevel = Math.max(0, ...depths);
+  const firstTargetLevel = Math.max(1, 6 - deepestLevel);
+  return depths.map((depth) => Math.min(6, firstTargetLevel + depth));
 }
 
 function capitalizeHeadingText(

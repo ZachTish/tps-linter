@@ -1,4 +1,4 @@
-export const SETTINGS_SCHEMA_VERSION = 2 as const;
+export const SETTINGS_SCHEMA_VERSION = 3 as const;
 
 export type FilenameUnsafeCharacterStyle = "space" | "dash" | "remove";
 export type HeadingCapitalizationStyle =
@@ -17,6 +17,7 @@ export interface TPSLinterSettings {
   ensureFinalNewline: boolean;
   headingCapitalizationStyle: HeadingCapitalizationStyle;
   normalizeHeadingLevels: boolean;
+  pushHeadingHierarchyToH6: boolean;
   headingStartLevel: HeadingStartLevel;
   sortFrontmatterFields: boolean;
   excludedPaths: string[];
@@ -57,6 +58,7 @@ export const DEFAULT_SETTINGS: ReadonlyTPSLinterSettings = Object.freeze({
   ensureFinalNewline: true,
   headingCapitalizationStyle: "first-letter",
   normalizeHeadingLevels: true,
+  pushHeadingHierarchyToH6: false,
   headingStartLevel: 1,
   sortFrontmatterFields: true,
   excludedPaths: DEFAULT_EXCLUDED_PATHS,
@@ -121,6 +123,10 @@ export function normalizeSettings(loadedData: unknown): TPSLinterSettings {
       data.normalizeHeadingLevels,
       DEFAULT_SETTINGS.normalizeHeadingLevels,
     ),
+    pushHeadingHierarchyToH6: readBoolean(
+      data.pushHeadingHierarchyToH6,
+      DEFAULT_SETTINGS.pushHeadingHierarchyToH6,
+    ),
     headingStartLevel: isHeadingStartLevel(data.headingStartLevel)
       ? data.headingStartLevel
       : DEFAULT_SETTINGS.headingStartLevel,
@@ -130,7 +136,7 @@ export function normalizeSettings(loadedData: unknown): TPSLinterSettings {
     ),
     excludedPaths: normalizeExcludedPaths(
       data.excludedPaths,
-      loadedSchemaVersion < SETTINGS_SCHEMA_VERSION,
+      loadedSchemaVersion < 2,
     ),
     diagnostics: readBoolean(data.diagnostics, DEFAULT_SETTINGS.diagnostics),
   };

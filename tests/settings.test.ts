@@ -19,6 +19,7 @@ const EXPECTED_SETTING_KEYS = [
   "headingCapitalizationStyle",
   "headingStartLevel",
   "normalizeHeadingLevels",
+  "pushHeadingHierarchyToH6",
   "removeObsidianLinkCharacters",
   "schemaVersion",
   "sortFrontmatterFields",
@@ -27,7 +28,7 @@ const EXPECTED_SETTING_KEYS = [
 
 test("settings defaults are conservative and TPS-specific", () => {
   assert.deepEqual(DEFAULT_SETTINGS, {
-    schemaVersion: 2,
+    schemaVersion: 3,
     filenameUnsafeCharacterStyle: "space",
     removeObsidianLinkCharacters: false,
     cleanWhitespaceOnlyLines: true,
@@ -36,6 +37,7 @@ test("settings defaults are conservative and TPS-specific", () => {
     ensureFinalNewline: true,
     headingCapitalizationStyle: "first-letter",
     normalizeHeadingLevels: true,
+    pushHeadingHierarchyToH6: false,
     headingStartLevel: 1,
     sortFrontmatterFields: true,
     excludedPaths: [
@@ -74,7 +76,7 @@ test("GCM property priority is trimmed, case-deduplicated, and fail-safe", () =>
   );
 });
 
-test("v2 settings contain no automatic mutation option", () => {
+test("v3 settings contain no automatic mutation option", () => {
   for (const key of [
     "automatic",
     "automaticMutation",
@@ -91,7 +93,7 @@ test("v2 settings contain no automatic mutation option", () => {
   }
 });
 
-test("normalization accepts valid values and stamps schema v2", () => {
+test("normalization accepts valid values and stamps schema v3", () => {
   assert.deepEqual(
     normalizeSettings({
       schemaVersion: 999,
@@ -103,6 +105,7 @@ test("normalization accepts valid values and stamps schema v2", () => {
       ensureFinalNewline: false,
       headingCapitalizationStyle: "title-case",
       normalizeHeadingLevels: false,
+      pushHeadingHierarchyToH6: true,
       headingStartLevel: 2,
       sortFrontmatterFields: false,
       excludedPaths: [],
@@ -118,6 +121,7 @@ test("normalization accepts valid values and stamps schema v2", () => {
       ensureFinalNewline: false,
       headingCapitalizationStyle: "title-case",
       normalizeHeadingLevels: false,
+      pushHeadingHierarchyToH6: true,
       headingStartLevel: 2,
       sortFrontmatterFields: false,
       excludedPaths: [],
@@ -137,6 +141,7 @@ test("invalid enum and primitive values safely fall back", () => {
       ensureFinalNewline: {},
       headingCapitalizationStyle: "sentence-case",
       normalizeHeadingLevels: "true",
+      pushHeadingHierarchyToH6: "yes",
       headingStartLevel: 3,
       sortFrontmatterFields: null,
       excludedPaths: "Templates",
@@ -167,6 +172,18 @@ test("v2 preserves an explicit exclusion list, including intentional removals", 
     }).excludedPaths,
     ["Custom/Safe"],
   );
+});
+
+test("v2 migration adds the new heading option without restoring removed exclusions", () => {
+  const normalized = normalizeSettings({
+    schemaVersion: 2,
+    excludedPaths: ["Custom/Safe"],
+    normalizeHeadingLevels: true,
+  });
+
+  assert.equal(normalized.schemaVersion, 3);
+  assert.equal(normalized.pushHeadingHierarchyToH6, false);
+  assert.deepEqual(normalized.excludedPaths, ["Custom/Safe"]);
 });
 
 test("unknown keys are ignored", () => {
@@ -240,6 +257,7 @@ test("settings UI preserves controls behind four accessible transient routes", (
     "Ensure a final newline",
     "Capitalize headings",
     "Normalize heading levels",
+    "Push heading hierarchy down to H6",
     "First heading level",
     "Sort frontmatter fields",
     "Unsafe character replacement",
@@ -255,7 +273,15 @@ test("settings UI preserves controls behind four accessible transient routes", (
   assert.match(source, /"aria-pressed"/);
   assert.match(source, /routeButtons\.get\(destination\.id\)\?\.focus\(\)/);
   assert.match(source, /focusSettingControl\("Normalize heading levels"\)/);
+  assert.match(
+    source,
+    /focusSettingControl\("Push heading hierarchy down to H6"\)/,
+  );
   assert.match(source, /if \(this\.plugin\.settings\.normalizeHeadingLevels\)/);
+  assert.match(
+    source,
+    /!this\.plugin\.settings\.pushHeadingHierarchyToH6/,
+  );
   assert.doesNotMatch(source, /createEl\(\s*["']details["']/);
   assert.doesNotMatch(source, /createEl\(\s*["']summary["']/);
 

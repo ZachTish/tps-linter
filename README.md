@@ -1,10 +1,10 @@
 # TPS Linter
 
-TPS Linter is a small, TPS-specific Obsidian cleaner for inspecting and deliberately cleaning one Markdown note at a time. Version `0.2.0` adds conservative spacing, heading, and frontmatter rules while keeping every mutation behind an explicit Clean action.
+TPS Linter is a small, TPS-specific Obsidian cleaner for inspecting and deliberately cleaning one Markdown note at a time. Version `0.3.0` adds an optional bottom-aligned heading hierarchy while keeping every mutation behind an explicit Clean action.
 
 ## Install with BRAT
 
-Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.2.0`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
+Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.3.0`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
 
 The released build is validated in the isolated Obsidian Plugin Test Vault. Publishing the release does not install it in the production vault; the production update remains a separate user-owned BRAT pull.
 
@@ -20,7 +20,7 @@ TPS Linter takes inspiration from upstream's consecutive-blank-line, heading-cap
 - **Clean current note** re-evaluates the live file, atomically cleans eligible Markdown content, and applies an eligible filename change only when filename ownership and collision guards allow it.
 - The same two actions are available in a Markdown file's context menu and at the top of the settings page.
 
-There is no whole-vault mutation command or background lint trigger in `0.2.0`. “Automatic” cleanup means that enabled rules run together when the user explicitly chooses **Clean current note**.
+There is no whole-vault mutation command or background lint trigger in `0.3.0`. “Automatic” cleanup means that enabled rules run together when the user explicitly chooses **Clean current note**.
 
 ## Filename rules and ownership
 
@@ -53,6 +53,10 @@ When nonblank trailing-whitespace cleanup is enabled, two literal terminal space
 
 Heading capitalization can be disabled, use the conservative first-letter default, or use title case while preserving already-cased terms such as `TPS`, `AI`, and `macOS`. Heading hierarchy can start at H1 or H2. The first ATX heading establishes the shift, repeated siblings remain peers, and a deeper heading may increase by at most one level from its current parent. Shallower returns remain allowed. Setext headings and headings containing TPS/Dataview inline fields, math, tags, URLs, email markers, wiki or Markdown links, inline code, HTML, Templater syntax, template braces, or block IDs keep their text byte-identical; their ATX level can still be normalized.
 
+**Push heading hierarchy down to H6** is an optional, default-off alternative to the H1/H2 start. It derives structural depth from the complete visible ATX outline, treats any deeper source heading as one nested step even when the original hashes skip levels, and shifts the outline so its deepest nesting level is H6. A standalone `## Test` becomes `###### Test`; a parent and child become H5/H6. Siblings remain peers, parent/child steps remain exactly one level, protected block headings do not affect the calculation, and visible headings with inline protected syntax still participate.
+
+The H6 shift is global across the visible outline. In an uneven tree, a shallow leaf can remain above H6 when another branch is deeper; this preserves sibling and parent relationships and makes repeated cleaning idempotent. While the option is enabled, **First heading level** is hidden but its saved H1/H2 value is retained. The option is dormant when heading normalization is off.
+
 ## Frontmatter ordering
 
 Only top-level mapping fields are reordered. When TPS Global Context Menu is loaded, its current property list supplies the priority order. Matching is case-insensitive while original field spelling is preserved. Without GCM, TPS Linter uses `status`, `priority`, `tags`, `recurrence`, `scheduled`, and `folderPath`, then sorts all remaining fields alphabetically with case-insensitive comparison.
@@ -83,13 +87,13 @@ No startup scan occurs. Check and clean operate only on the explicitly selected 
 Check and Clean actions remain first. The always-visible **Choose what to configure** hub has four one-click destinations:
 
 1. **Clean notes** — blank lines, whitespace, and final newline;
-2. **Headings** — capitalization, hierarchy normalization, and H1/H2 start;
+2. **Headings** — capitalization, hierarchy normalization, H1/H2 start, and optional bottom alignment to H6;
 3. **Frontmatter** — safe top-level sorting and the GCM property-order handoff; and
 4. **Files & safety** — filename rules, filename ownership, exclusions, and diagnostics.
 
 **Clean notes** is the default route. Only the active destination is rendered, with one conditional control for the first heading level. Route, focus, disclosure, and scroll state are transient and create no persisted fields. Route buttons use `aria-pressed`; focus is restored after user-invoked rerenders; keyboard focus is visible. On narrow screens the route hub is a horizontally scrollable strip, action cards stack, controls use full width, and labels wrap. Every CSS selector is namespaced under `tps-linter`.
 
-Persisted data uses schema version `2` and contains only rule choices, exclusion patterns, and the diagnostics toggle. Unknown or invalid saved values normalize to safe defaults. Loading schema v1 preserves custom exclusions and appends `_templates` and `System/Templates`; subsequent schema v2 saves preserve intentional exclusion removals.
+Persisted data uses schema version `3` and contains only rule choices, exclusion patterns, and the diagnostics toggle. Unknown or invalid saved values normalize to safe defaults. Loading schema v1 preserves custom exclusions and appends `_templates` and `System/Templates`; schema v2 and v3 preserve intentional exclusion removals. Existing installations receive the new H6 option disabled.
 
 ## Diagnostics and safety
 
@@ -103,6 +107,7 @@ The plugin has no network access, credentials, scheduled work, startup sweep, sa
 - There is no batch clean, background clean, diff modal, Setext-heading rewrite, or custom regular-expression rule.
 - Frontmatter sorting intentionally skips advanced YAML features that cannot be moved and verified with high confidence.
 - Heading text changes can affect explicit heading-fragment links, so structural and capitalization rules remain part of the user-invoked Clean action rather than a save hook.
+- Bottom alignment operates on the complete visible ATX outline; a shallow leaf in an uneven tree may remain above H6 to preserve structural relationships.
 - Protected-block detection is conservative. A malformed or unclosed protected construct remains untouched rather than being guessed at.
 - Mobile layout is covered by responsive contract tests and desktop-width inspection; final native iOS interaction remains a separate device check.
 
@@ -125,6 +130,10 @@ npm run build
 
 Stable production-mode builds deploy byte-changed `main.js`, `manifest.json`, and `styles.css` only to the isolated test runtime `.obsidian/plugins/tps-linter`. They do not overwrite runtime-owned `data.json`. Direct production deployment is not part of this workflow.
 
+### 0.3.0 validation
+
+Validation covers the default-off H6 option, a standalone H2-to-H6 transformation, skipped source levels, repeated siblings, uneven branches, multiple roots, protected blocks, inline protected headings, preserved CRLF and closing markers, dormant behavior when normalization is off, schema v2-to-v3 migration, conditional settings visibility, idempotence, TypeScript, the complete declared suite, a separate final production-mode build, runtime deployment, reloaded settings inspection, and explicit linting of synthetic messy Inbox notes. Exact final counts, artifact hashes, reload evidence, and QA note disposition are recorded in `release-notes/0.3.0.md`.
+
 ### 0.2.0 validation
 
 Validation covers safe YAML CST sorting and semantic verification, GCM property-order compatibility, blank-line and heading rules, protected regions, exact line endings, idempotence, schema migration, destination navigation, accessibility/mobile contracts, commands, TypeScript, the complete declared suite, a separate final production-mode build, runtime deployment, reloaded settings inspection, and explicit linting of synthetic messy Inbox notes. All 51 automated tests passed; exact reload evidence, artifact hashes, and QA note disposition are recorded in `release-notes/0.2.0.md`.
@@ -134,6 +143,13 @@ Validation covers safe YAML CST sorting and semantic verification, GCM property-
 Validation covers pure filename planning and collision/ownership guards, TPS filename preservation, exact line-ending and protected-block preservation, idempotence, settings normalization, command and settings contracts, TypeScript, the complete declared suite, a separate final production-mode build, runtime deployment, and a reloaded test-vault UI inspection. Exact final test counts, reload evidence, and artifact hashes are recorded in `release-notes/0.1.0.md`.
 
 ## Version history
+
+### 0.3.0
+
+- Added the default-off **Push heading hierarchy down to H6** option.
+- Bottom-aligns the complete visible ATX outline while preserving parent, sibling, and one-level nesting relationships.
+- Keeps protected block headings out of the outline calculation and preserves inline-protected visible headings as structural participants.
+- Migrated settings to schema v3 without restoring intentionally removed v2 exclusions.
 
 ### 0.2.0
 

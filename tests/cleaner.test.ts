@@ -21,6 +21,7 @@ const DEFAULT_MARKDOWN_OPTIONS = {
   ensureFinalNewline: true,
   headingCapitalizationStyle: "first-letter" as const,
   normalizeHeadingLevels: true,
+  pushHeadingHierarchyToH6: false,
   headingStartLevel: 1 as const,
   sortFrontmatterFields: true,
   frontmatterPriorityKeys: [
@@ -457,6 +458,133 @@ test("heading normalization keeps repeated siblings at the same level", () => {
       "## Child three\n",
     ].join(""),
   );
+});
+
+test("optional lowest-level mode pushes a standalone heading to H6", () => {
+  const result = cleanMarkdown("## test ##\r\n", {
+    ...DEFAULT_MARKDOWN_OPTIONS,
+    pushHeadingHierarchyToH6: true,
+  });
+
+  assert.equal(result.output, "###### Test ##\r\n");
+  assert.equal(result.changes.headingsCapitalized, 1);
+  assert.equal(result.changes.headingLevelsAdjusted, 1);
+
+  const second = cleanMarkdown(result.output, {
+    ...DEFAULT_MARKDOWN_OPTIONS,
+    pushHeadingHierarchyToH6: true,
+  });
+  assert.equal(second.changed, false);
+  assert.equal(second.output, result.output);
+});
+
+test("optional lowest-level mode preserves nested outline relationships", () => {
+  const result = cleanMarkdown(
+    [
+      "## root\n",
+      "#### child one\n",
+      "#### child two\n",
+      "###### grandchild\n",
+      "#### child three\n",
+    ].join(""),
+    {
+      ...DEFAULT_MARKDOWN_OPTIONS,
+      pushHeadingHierarchyToH6: true,
+    },
+  );
+
+  assert.equal(
+    result.output,
+    [
+      "#### Root\n",
+      "##### Child one\n",
+      "##### Child two\n",
+      "###### Grandchild\n",
+      "##### Child three\n",
+    ].join(""),
+  );
+  assert.equal(result.changes.headingsCapitalized, 5);
+  assert.equal(result.changes.headingLevelsAdjusted, 4);
+
+  const second = cleanMarkdown(result.output, {
+    ...DEFAULT_MARKDOWN_OPTIONS,
+    pushHeadingHierarchyToH6: true,
+  });
+  assert.equal(second.changed, false);
+});
+
+test("optional lowest-level mode ignores protected headings but counts visible markup headings", () => {
+  const result = cleanMarkdown(
+    [
+      "```md\n",
+      "# hidden parent\n",
+      "## hidden child\n",
+      "```\n",
+      "## [[visible parent]]\n",
+      "###### visible child\n",
+    ].join(""),
+    {
+      ...DEFAULT_MARKDOWN_OPTIONS,
+      pushHeadingHierarchyToH6: true,
+    },
+  );
+
+  assert.equal(
+    result.output,
+    [
+      "```md\n",
+      "# hidden parent\n",
+      "## hidden child\n",
+      "```\n",
+      "##### [[visible parent]]\n",
+      "###### Visible child\n",
+    ].join(""),
+  );
+  assert.equal(result.changes.headingsCapitalized, 1);
+  assert.equal(result.changes.headingLevelsAdjusted, 1);
+});
+
+test("optional lowest-level mode keeps roots and siblings aligned through inline protected headings", () => {
+  const result = cleanMarkdown(
+    [
+      "## first root\n",
+      "## second root %% private annotation %%\n",
+      "##### child one\n",
+      "##### child two\n",
+    ].join(""),
+    {
+      ...DEFAULT_MARKDOWN_OPTIONS,
+      pushHeadingHierarchyToH6: true,
+    },
+  );
+
+  assert.equal(
+    result.output,
+    [
+      "##### First root\n",
+      "##### second root %% private annotation %%\n",
+      "###### Child one\n",
+      "###### Child two\n",
+    ].join(""),
+  );
+
+  const second = cleanMarkdown(result.output, {
+    ...DEFAULT_MARKDOWN_OPTIONS,
+    pushHeadingHierarchyToH6: true,
+  });
+  assert.equal(second.changed, false);
+});
+
+test("optional lowest-level mode is dormant when heading normalization is off", () => {
+  const result = cleanMarkdown("## test\n", {
+    ...DEFAULT_MARKDOWN_OPTIONS,
+    normalizeHeadingLevels: false,
+    pushHeadingHierarchyToH6: true,
+  });
+
+  assert.equal(result.output, "## Test\n");
+  assert.equal(result.changes.headingsCapitalized, 1);
+  assert.equal(result.changes.headingLevelsAdjusted, 0);
 });
 
 test("heading options preserve markup and support H2 and title case", () => {

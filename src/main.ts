@@ -326,6 +326,7 @@ export default class TPSLinterPlugin extends Plugin {
       headingCapitalizationStyle:
         this.settings.headingCapitalizationStyle,
       normalizeHeadingLevels: this.settings.normalizeHeadingLevels,
+      pushHeadingHierarchyToH6: this.settings.pushHeadingHierarchyToH6,
       headingStartLevel: this.settings.headingStartLevel,
       sortFrontmatterFields: this.settings.sortFrontmatterFields,
       frontmatterPriorityKeys: this.getFrontmatterPriorityKeys(),
