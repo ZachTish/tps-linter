@@ -1,6 +1,6 @@
 {
   "name": "tps-linter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "TPS-specific note and filename cleanup for Obsidian.",
   "main": "main.js",
   "type": "module",
@@ -18,6 +18,9 @@
   ],
   "author": "Zach Tisherman",
   "license": "MIT",
+  "dependencies": {
+    "yaml": "2.9.0"
+  },
   "devDependencies": {
     "@types/node": "^22.15.17",
     "esbuild": "0.25.5",

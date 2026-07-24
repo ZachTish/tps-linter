@@ -16,8 +16,21 @@ const DEFAULT_FILENAME_OPTIONS = {
 
 const DEFAULT_MARKDOWN_OPTIONS = {
   cleanWhitespaceOnlyLines: true,
+  collapseConsecutiveBlankLines: true,
   trimNonblankTrailingWhitespace: false,
   ensureFinalNewline: true,
+  headingCapitalizationStyle: "first-letter" as const,
+  normalizeHeadingLevels: true,
+  headingStartLevel: 1 as const,
+  sortFrontmatterFields: true,
+  frontmatterPriorityKeys: [
+    "status",
+    "priority",
+    "tags",
+    "recurrence",
+    "scheduled",
+    "folderPath",
+  ],
 };
 
 test("filename planning cleans only narrow cross-platform hazards", () => {
@@ -209,7 +222,12 @@ test("Markdown cleanup preserves BOM and every existing line separator", () => {
   assert.equal(result.output, "\uFEFFTitle\r\n\nBody\r\r\nTail\r\n");
   assert.deepEqual(result.changes, {
     whitespaceOnlyLinesCleaned: 2,
+    extraBlankLinesRemoved: 0,
     nonblankTrailingWhitespaceLinesCleaned: 0,
+    headingsCapitalized: 0,
+    headingLevelsAdjusted: 0,
+    frontmatterFieldsReordered: 0,
+    frontmatterSortSkippedReason: null,
     finalNewlineAdded: true,
   });
   assert.equal(result.changed, true);
@@ -301,13 +319,347 @@ test("opt-in trailing cleanup preserves two-space hard breaks and TPS fields", (
   assert.equal(result.changes.nonblankTrailingWhitespaceLinesCleaned, 2);
 });
 
+test("extra blank lines collapse only outside protected TPS regions", () => {
+  const input = [
+    "Before\n",
+    "\n",
+    " \n",
+    "\n",
+    "After\n",
+    "\n",
+    "```md\n",
+    "\n",
+    "\n",
+    "```\n",
+    "\n",
+    "$$\n",
+    "\n",
+    "\n",
+    "$$\n",
+    "\n",
+    "<pre>\n",
+    "\n",
+    "\n",
+    "</pre>\n",
+    "\n",
+    "    indented code\n",
+    "\n",
+    "\n",
+    "    still code\n",
+    "Done\n",
+  ].join("");
+  const expected = [
+    "Before\n",
+    "\n",
+    "After\n",
+    "\n",
+    "```md\n",
+    "\n",
+    "\n",
+    "```\n",
+    "\n",
+    "$$\n",
+    "\n",
+    "\n",
+    "$$\n",
+    "\n",
+    "<pre>\n",
+    "\n",
+    "\n",
+    "</pre>\n",
+    "\n",
+    "    indented code\n",
+    "\n",
+    "\n",
+    "    still code\n",
+    "Done\n",
+  ].join("");
+
+  const result = cleanMarkdown(input, DEFAULT_MARKDOWN_OPTIONS);
+  assert.equal(result.output, expected);
+  assert.equal(result.changes.whitespaceOnlyLinesCleaned, 1);
+  assert.equal(result.changes.extraBlankLinesRemoved, 2);
+});
+
+test("all valid indented code widths remain byte-identical", () => {
+  const input = [
+    "     five-space code   \n",
+    "\n",
+    "\n",
+    "        eight-space code   \n",
+    "\n",
+    "\t tab-space code   \n",
+    " \t one-space-tab code   \n",
+    "   \t three-space-tab code   \n",
+    "Done\n",
+  ].join("");
+  const result = cleanMarkdown(input, {
+    ...DEFAULT_MARKDOWN_OPTIONS,
+    trimNonblankTrailingWhitespace: true,
+  });
+
+  assert.equal(result.output, input);
+  assert.equal(result.changes.extraBlankLinesRemoved, 0);
+  assert.equal(result.changes.nonblankTrailingWhitespaceLinesCleaned, 0);
+});
+
+test("heading cleanup starts at H1 and permits only one-level increases", () => {
+  const input = [
+    "### lower heading ###\n",
+    "##### much deeper heading\n",
+    "## TPS roadmap\n",
+    "###### another jump\n",
+    "Setext title\n",
+    "===\n",
+    "```md\n",
+    "#### fenced heading\n",
+    "```\n",
+  ].join("");
+  const result = cleanMarkdown(input, DEFAULT_MARKDOWN_OPTIONS);
+
+  assert.equal(
+    result.output,
+    [
+      "# Lower heading ###\n",
+      "## Much deeper heading\n",
+      "# TPS roadmap\n",
+      "## Another jump\n",
+      "Setext title\n",
+      "===\n",
+      "```md\n",
+      "#### fenced heading\n",
+      "```\n",
+    ].join(""),
+  );
+  assert.equal(result.changes.headingsCapitalized, 3);
+  assert.equal(result.changes.headingLevelsAdjusted, 4);
+});
+
+test("heading normalization keeps repeated siblings at the same level", () => {
+  const result = cleanMarkdown(
+    [
+      "# parent\n",
+      "### child one\n",
+      "### child two\n",
+      "#### grandchild\n",
+      "### child three\n",
+    ].join(""),
+    DEFAULT_MARKDOWN_OPTIONS,
+  );
+
+  assert.equal(
+    result.output,
+    [
+      "# Parent\n",
+      "## Child one\n",
+      "## Child two\n",
+      "### Grandchild\n",
+      "## Child three\n",
+    ].join(""),
+  );
+});
+
+test("heading options preserve markup and support H2 and title case", () => {
+  const result = cleanMarkdown(
+    [
+      "#### a guide to TPS and macOS\n",
+      "###### deeper heading\n",
+      "### [[linked heading]]\n",
+      "### `code heading`\n",
+    ].join(""),
+    {
+      ...DEFAULT_MARKDOWN_OPTIONS,
+      headingCapitalizationStyle: "title-case",
+      headingStartLevel: 2,
+    },
+  );
+
+  assert.equal(
+    result.output,
+    [
+      "## A Guide to TPS and macOS\n",
+      "### Deeper Heading\n",
+      "## [[linked heading]]\n",
+      "## `code heading`\n",
+    ].join(""),
+  );
+  assert.equal(result.changes.headingsCapitalized, 2);
+  assert.equal(result.changes.headingLevelsAdjusted, 4);
+});
+
+test("heading capitalization skips TPS fields, math, tags, and links", () => {
+  const input = [
+    "# [status:: open]\n",
+    "# $e = mc^2$\n",
+    "# #project/tps\n",
+    "# [reference link][target]\n",
+    "# https://example.com/path\n",
+    "# ordinary heading\n",
+  ].join("");
+  const result = cleanMarkdown(input, {
+    ...DEFAULT_MARKDOWN_OPTIONS,
+    normalizeHeadingLevels: false,
+  });
+
+  assert.equal(
+    result.output,
+    [
+      "# [status:: open]\n",
+      "# $e = mc^2$\n",
+      "# #project/tps\n",
+      "# [reference link][target]\n",
+      "# https://example.com/path\n",
+      "# Ordinary heading\n",
+    ].join(""),
+  );
+  assert.equal(result.changes.headingsCapitalized, 1);
+});
+
+test("Obsidian and HTML comments remain protected byte-for-byte", () => {
+  const input = [
+    "%%\n",
+    "### hidden heading\n",
+    "\n",
+    "\n",
+    "%%\n",
+    "<!--\n",
+    "##### html hidden heading\n",
+    "\n",
+    "\n",
+    "-->\n",
+    "### visible heading\n",
+  ].join("");
+  const result = cleanMarkdown(input, DEFAULT_MARKDOWN_OPTIONS);
+
+  assert.equal(
+    result.output,
+    [
+      "%%\n",
+      "### hidden heading\n",
+      "\n",
+      "\n",
+      "%%\n",
+      "<!--\n",
+      "##### html hidden heading\n",
+      "\n",
+      "\n",
+      "-->\n",
+      "# Visible heading\n",
+    ].join(""),
+  );
+  assert.equal(result.changes.extraBlankLinesRemoved, 0);
+  assert.equal(result.changes.headingsCapitalized, 1);
+  assert.equal(result.changes.headingLevelsAdjusted, 1);
+});
+
+test("visible headings with inline protected syntax still define hierarchy", () => {
+  const input = [
+    "### parent %% hidden note %%\n",
+    "##### child\n",
+    "### templater <% tp.file.title %>\n",
+    "##### templater child\n",
+    "### html <!-- hidden note -->\n",
+    "##### html child\n",
+  ].join("");
+  const result = cleanMarkdown(input, DEFAULT_MARKDOWN_OPTIONS);
+
+  assert.equal(
+    result.output,
+    [
+      "# parent %% hidden note %%\n",
+      "## Child\n",
+      "# templater <% tp.file.title %>\n",
+      "## Templater child\n",
+      "# html <!-- hidden note -->\n",
+      "## Html child\n",
+    ].join(""),
+  );
+  assert.equal(result.changes.headingsCapitalized, 3);
+  assert.equal(result.changes.headingLevelsAdjusted, 6);
+});
+
+test("indented thematic breaks are never mistaken for frontmatter", () => {
+  const input = [
+    "    ---\n",
+    "    zeta: code\n",
+    "    alpha: code\n",
+    "    ---",
+  ].join("");
+  const result = cleanMarkdown(input, DEFAULT_MARKDOWN_OPTIONS);
+
+  assert.equal(result.output, input);
+  assert.equal(result.changes.frontmatterFieldsReordered, 0);
+  assert.equal(result.changes.frontmatterSortSkippedReason, null);
+});
+
+test("frontmatter sorting follows TPS priority and preserves the note body", () => {
+  const input = [
+    "---\n",
+    "owner: Zach\n",
+    "Status: active\n",
+    "tags:\n",
+    "  - tps\n",
+    "alpha: one\n",
+    "---\n",
+    "# already capitalized\n",
+  ].join("");
+  const result = cleanMarkdown(input, DEFAULT_MARKDOWN_OPTIONS);
+
+  assert.equal(
+    result.output,
+    [
+      "---\n",
+      "Status: active\n",
+      "tags:\n",
+      "  - tps\n",
+      "alpha: one\n",
+      "owner: Zach\n",
+      "---\n",
+      "# Already capitalized\n",
+    ].join(""),
+  );
+  assert.ok(result.changes.frontmatterFieldsReordered > 0);
+  assert.equal(result.changes.frontmatterSortSkippedReason, null);
+});
+
+test("unsafe frontmatter fails closed while independent body rules still run", () => {
+  const input = [
+    "---\n",
+    "status: active\n",
+    "status: duplicate\n",
+    "---\n",
+    "### lower heading",
+  ].join("");
+  const result = cleanMarkdown(input, DEFAULT_MARKDOWN_OPTIONS);
+
+  assert.equal(
+    result.output,
+    [
+      "---\n",
+      "status: active\n",
+      "status: duplicate\n",
+      "---\n",
+      "# Lower heading\n",
+    ].join(""),
+  );
+  assert.match(
+    result.changes.frontmatterSortSkippedReason ?? "",
+    /duplicate/i,
+  );
+});
+
 test("empty and already-clean Markdown are no-ops and cleanup is idempotent", () => {
   assert.deepEqual(cleanMarkdown("", DEFAULT_MARKDOWN_OPTIONS), {
     output: "",
     changed: false,
     changes: {
       whitespaceOnlyLinesCleaned: 0,
+      extraBlankLinesRemoved: 0,
       nonblankTrailingWhitespaceLinesCleaned: 0,
+      headingsCapitalized: 0,
+      headingLevelsAdjusted: 0,
+      frontmatterFieldsReordered: 0,
+      frontmatterSortSkippedReason: null,
       finalNewlineAdded: false,
     },
   });

@@ -1,10 +1,49 @@
 import { App, ButtonComponent, PluginSettingTab, Setting } from "obsidian";
 
 import type TPSLinterPlugin from "./main";
-import type { FilenameUnsafeCharacterStyle } from "./settings";
+import type {
+  FilenameUnsafeCharacterStyle,
+  HeadingCapitalizationStyle,
+  HeadingStartLevel,
+} from "./settings";
+
+type SettingsDestination =
+  | "clean-notes"
+  | "headings"
+  | "frontmatter"
+  | "files-safety";
+
+const SETTINGS_DESTINATIONS: ReadonlyArray<{
+  id: SettingsDestination;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: "clean-notes",
+    label: "Clean notes",
+    description: "Blank lines and whitespace",
+  },
+  {
+    id: "headings",
+    label: "Headings",
+    description: "Capitalization and levels",
+  },
+  {
+    id: "frontmatter",
+    label: "Frontmatter",
+    description: "Top-level field order",
+  },
+  {
+    id: "files-safety",
+    label: "Files & safety",
+    description: "Names, scope, and diagnostics",
+  },
+];
 
 export class TPSLinterSettingTab extends PluginSettingTab {
   private readonly plugin: TPSLinterPlugin;
+  private activeDestination: SettingsDestination = "clean-notes";
+  private routeButtons = new Map<SettingsDestination, HTMLButtonElement>();
   private statusEl: HTMLElement | null = null;
 
   constructor(app: App, plugin: TPSLinterPlugin) {
@@ -20,15 +59,34 @@ export class TPSLinterSettingTab extends PluginSettingTab {
     containerEl.createEl("h2", { text: "TPS Linter" });
     containerEl.createEl("p", {
       cls: "tps-linter-settings-intro",
-      text: "Check first, then clean one explicit Markdown note. Version 0.1.0 performs no background or whole-vault cleanup.",
+      text: "Check first, then clean one explicit Markdown note. TPS Linter performs no background or whole-vault cleanup.",
     });
 
     this.renderActions(containerEl);
-    this.renderOwnership(containerEl);
-    this.renderFilenameRules(containerEl);
-    this.renderMarkdownRules(containerEl);
-    this.renderScope(containerEl);
-    this.renderDiagnostics(containerEl);
+    this.renderDestinationHub(containerEl);
+
+    const destination = containerEl.createDiv({
+      cls: "tps-linter-settings-destination",
+    });
+    destination.setAttribute("data-destination", this.activeDestination);
+
+    switch (this.activeDestination) {
+      case "clean-notes":
+        this.renderMarkdownRules(destination);
+        break;
+      case "headings":
+        this.renderHeadingRules(destination);
+        break;
+      case "frontmatter":
+        this.renderFrontmatterRules(destination);
+        break;
+      case "files-safety":
+        this.renderOwnership(destination);
+        this.renderFilenameRules(destination);
+        this.renderScope(destination);
+        this.renderDiagnostics(destination);
+        break;
+    }
   }
 
   private renderActions(parent: HTMLElement): void {
@@ -57,6 +115,39 @@ export class TPSLinterSettingTab extends PluginSettingTab {
     this.statusEl = parent.createDiv({ cls: "tps-linter-settings-status" });
     this.statusEl.setAttribute("aria-live", "polite");
     this.statusEl.setAttribute("role", "status");
+  }
+
+  private renderDestinationHub(parent: HTMLElement): void {
+    const hub = parent.createDiv({ cls: "tps-linter-settings-route-hub" });
+    hub.createEl("h3", { text: "Choose what to configure" });
+    hub.createEl("p", {
+      text: "Each area stays one click away. Your selected area is temporary and is not saved as a plugin setting.",
+    });
+
+    const routes = hub.createDiv({ cls: "tps-linter-settings-route-strip" });
+    routes.setAttribute("role", "group");
+    routes.setAttribute("aria-label", "TPS Linter settings areas");
+    this.routeButtons.clear();
+
+    for (const destination of SETTINGS_DESTINATIONS) {
+      const button = routes.createEl("button", {
+        cls: "tps-linter-settings-route",
+        attr: {
+          type: "button",
+          "aria-pressed":
+            destination.id === this.activeDestination ? "true" : "false",
+          "aria-label": `${destination.label}: ${destination.description}`,
+        },
+      });
+      button.createEl("strong", { text: destination.label });
+      button.createSpan({ text: destination.description });
+      button.addEventListener("click", () => {
+        this.activeDestination = destination.id;
+        this.display();
+        this.routeButtons.get(destination.id)?.focus();
+      });
+      this.routeButtons.set(destination.id, button);
+    }
   }
 
   private renderOwnership(parent: HTMLElement): void {
@@ -111,7 +202,19 @@ export class TPSLinterSettingTab extends PluginSettingTab {
   }
 
   private renderMarkdownRules(parent: HTMLElement): void {
-    parent.createEl("h3", { text: "Markdown rules" });
+    parent.createEl("h3", { text: "Clean notes" });
+
+    new Setting(parent)
+      .setName("Remove extra blank lines")
+      .setDesc("Collapse consecutive blank lines to one outside protected YAML, code, math, raw HTML, and Templater regions.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.collapseConsecutiveBlankLines)
+          .onChange(async (value) => {
+            this.plugin.settings.collapseConsecutiveBlankLines = value;
+            await this.plugin.saveSettings();
+          });
+      });
 
     new Setting(parent)
       .setName("Clear whitespace-only lines")
@@ -148,6 +251,94 @@ export class TPSLinterSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
+  }
+
+  private renderHeadingRules(parent: HTMLElement): void {
+    parent.createEl("h3", { text: "Headings" });
+
+    new Setting(parent)
+      .setName("Capitalize headings")
+      .setDesc("Choose how explicit cleaning adjusts plain ATX heading text. First letter is the conservative TPS default.")
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption("off", "Off")
+          .addOption("first-letter", "Capitalize first letter")
+          .addOption("title-case", "Use title case")
+          .setValue(this.plugin.settings.headingCapitalizationStyle)
+          .onChange(async (value) => {
+            this.plugin.settings.headingCapitalizationStyle =
+              value as HeadingCapitalizationStyle;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(parent)
+      .setName("Normalize heading levels")
+      .setDesc("Start the heading hierarchy at the selected level and prevent a heading from increasing by more than one level.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.normalizeHeadingLevels)
+          .onChange(async (value) => {
+            this.plugin.settings.normalizeHeadingLevels = value;
+            await this.plugin.saveSettings();
+            this.display();
+            this.focusSettingControl("Normalize heading levels");
+          });
+      });
+
+    if (this.plugin.settings.normalizeHeadingLevels) {
+      new Setting(parent)
+        .setName("First heading level")
+        .setDesc("Use H1 for normal notes or H2 when another system owns the page title.")
+        .addDropdown((dropdown) => {
+          dropdown
+            .addOption("1", "H1")
+            .addOption("2", "H2")
+            .setValue(String(this.plugin.settings.headingStartLevel))
+            .onChange(async (value) => {
+              this.plugin.settings.headingStartLevel =
+                Number(value) as HeadingStartLevel;
+              await this.plugin.saveSettings();
+            });
+        });
+    }
+  }
+
+  private renderFrontmatterRules(parent: HTMLElement): void {
+    parent.createEl("h3", { text: "Frontmatter" });
+
+    new Setting(parent)
+      .setName("Sort frontmatter fields")
+      .setDesc("Order top-level fields using TPS Global Context Menu property priority first, then sort remaining fields alphabetically.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.sortFrontmatterFields)
+          .onChange(async (value) => {
+            this.plugin.settings.sortFrontmatterFields = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    const ownership = parent.createDiv({
+      cls: "tps-linter-settings-frontmatter-ownership",
+    });
+    const copy = ownership.createDiv({
+      cls: "tps-linter-settings-frontmatter-copy",
+    });
+    copy.createEl("strong", { text: "Property order ownership" });
+    copy.createSpan({
+      text: "TPS Global Context Menu owns the shared priority order. TPS Linter follows that order when available and uses its TPS fallback order otherwise; fields not listed there remain alphabetical.",
+    });
+    copy.createSpan({
+      text: `Current priority: ${this.plugin.getFrontmatterPriorityKeys().join(" → ")}`,
+    });
+    const controls = ownership.createDiv({
+      cls: "tps-linter-settings-frontmatter-actions",
+    });
+    new ButtonComponent(controls)
+      .setButtonText("Open GCM settings")
+      .setTooltip("Configure TPS Global Context Menu property order")
+      .onClick(() => this.openPluginSettings("tps-global-context-menu"));
   }
 
   private renderScope(parent: HTMLElement): void {
@@ -208,5 +399,23 @@ export class TPSLinterSettingTab extends PluginSettingTab {
     }).setting;
     settings?.open?.();
     settings?.openTabById?.(pluginId);
+  }
+
+  private focusSettingControl(settingName: string): void {
+    const settingItems = Array.from(
+      this.containerEl.querySelectorAll(".setting-item"),
+    ) as HTMLElement[];
+    for (const settingItem of settingItems) {
+      const name = settingItem.querySelector(
+        ".setting-item-name",
+      ) as HTMLElement | null;
+      if (name?.textContent !== settingName) continue;
+
+      const control = settingItem.querySelector(
+        "button, input, select, textarea",
+      ) as HTMLElement | null;
+      control?.focus();
+      return;
+    }
   }
 }

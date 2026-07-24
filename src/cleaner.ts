@@ -1,4 +1,8 @@
-import type { FilenameUnsafeCharacterStyle } from "./settings";
+import { sortTopLevelFrontmatterFields } from "./frontmatter-sort.ts";
+import type {
+  FilenameUnsafeCharacterStyle,
+  HeadingCapitalizationStyle,
+} from "./settings";
 
 export interface FilenameCleanupOptions {
   unsafeCharacterStyle: FilenameUnsafeCharacterStyle;
@@ -32,13 +36,24 @@ export interface FilenameRenameDecision {
 
 export interface MarkdownCleanupOptions {
   cleanWhitespaceOnlyLines: boolean;
+  collapseConsecutiveBlankLines: boolean;
   trimNonblankTrailingWhitespace: boolean;
   ensureFinalNewline: boolean;
+  headingCapitalizationStyle: HeadingCapitalizationStyle;
+  normalizeHeadingLevels: boolean;
+  headingStartLevel: 1 | 2;
+  sortFrontmatterFields: boolean;
+  frontmatterPriorityKeys: readonly string[];
 }
 
 export interface MarkdownCleanupChanges {
   whitespaceOnlyLinesCleaned: number;
+  extraBlankLinesRemoved: number;
   nonblankTrailingWhitespaceLinesCleaned: number;
+  headingsCapitalized: number;
+  headingLevelsAdjusted: number;
+  frontmatterFieldsReordered: number;
+  frontmatterSortSkippedReason: string | null;
   finalNewlineAdded: boolean;
 }
 
@@ -58,16 +73,31 @@ interface LineToken {
   ending: "" | "\n" | "\r" | "\r\n";
 }
 
+interface ProcessedLineToken extends LineToken {
+  protected: boolean;
+}
+
 interface FenceState {
   marker: "`" | "~";
   length: number;
 }
 
+interface NormalizedHeadingLevel {
+  source: number;
+  target: number;
+}
+
 type RawProtectedTag = "pre" | "textarea" | "script" | "style";
+type MarkdownComment = "obsidian" | "html";
 
 interface InlineProtectedState {
   rawTag: RawProtectedTag | null;
   inTemplater: boolean;
+  protected: boolean;
+}
+
+interface CommentProtectedState {
+  comment: MarkdownComment | null;
   protected: boolean;
 }
 
@@ -85,6 +115,26 @@ const HARD_EXCLUDED_PREFIXES = [
   "Plugin Development",
   "_assets/TPS AI Queue",
 ];
+const TITLE_CASE_MINOR_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "as",
+  "at",
+  "but",
+  "by",
+  "for",
+  "from",
+  "in",
+  "nor",
+  "of",
+  "on",
+  "or",
+  "the",
+  "to",
+  "via",
+  "with",
+]);
 
 export function planMarkdownFilename(
   sourcePath: string,
@@ -268,18 +318,38 @@ export function cleanMarkdown(
   input: string,
   options: MarkdownCleanupOptions,
 ): MarkdownCleanupResult {
-  const tokens = splitLinesPreservingEndings(input);
   const changes: MarkdownCleanupChanges = {
     whitespaceOnlyLinesCleaned: 0,
+    extraBlankLinesRemoved: 0,
     nonblankTrailingWhitespaceLinesCleaned: 0,
+    headingsCapitalized: 0,
+    headingLevelsAdjusted: 0,
+    frontmatterFieldsReordered: 0,
+    frontmatterSortSkippedReason: null,
     finalNewlineAdded: false,
   };
 
+  let workingInput = input;
+  if (options.sortFrontmatterFields) {
+    const frontmatter = sortDocumentFrontmatter(
+      workingInput,
+      options.frontmatterPriorityKeys,
+    );
+    workingInput = frontmatter.output;
+    changes.frontmatterFieldsReordered = frontmatter.fieldsReordered;
+    changes.frontmatterSortSkippedReason = frontmatter.skippedReason;
+  }
+
+  const tokens = splitLinesPreservingEndings(workingInput);
+  const processedTokens: ProcessedLineToken[] = [];
   let inFrontmatter = false;
   let fence: FenceState | null = null;
+  let inMathBlock = false;
+  let inIndentedCode = false;
+  let comment: MarkdownComment | null = null;
   let rawTag: RawProtectedTag | null = null;
   let inTemplater = false;
-  let finalTokenWasProtected = false;
+  const headingHierarchy: NormalizedHeadingLevel[] = [];
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
@@ -293,14 +363,39 @@ export function cleanMarkdown(
       if (/^(?:---|\.\.\.)[ \t]*$/.test(comparisonBody)) {
         inFrontmatter = false;
       }
-      finalTokenWasProtected = tokenWasProtected;
+      processedTokens.push({ ...token, protected: tokenWasProtected });
       continue;
     }
 
     if (fence) {
       tokenWasProtected = true;
       if (isFenceClose(comparisonBody, fence)) fence = null;
-      finalTokenWasProtected = tokenWasProtected;
+      processedTokens.push({ ...token, protected: tokenWasProtected });
+      continue;
+    }
+
+    if (inMathBlock) {
+      tokenWasProtected = true;
+      if (isMathBlockDelimiter(comparisonBody)) inMathBlock = false;
+      processedTokens.push({ ...token, protected: tokenWasProtected });
+      continue;
+    }
+
+    if (inIndentedCode) {
+      if (
+        comparisonBody.trim().length === 0 ||
+        isIndentedCodeLine(comparisonBody)
+      ) {
+        processedTokens.push({ ...token, protected: true });
+        continue;
+      }
+      inIndentedCode = false;
+    }
+
+    if (comment) {
+      const commentState = scanCommentConstructs(comparisonBody, comment);
+      comment = commentState.comment;
+      processedTokens.push({ ...token, protected: true });
       continue;
     }
 
@@ -313,20 +408,61 @@ export function cleanMarkdown(
       rawTag = protectedState.rawTag;
       inTemplater = protectedState.inTemplater;
       tokenWasProtected = true;
-      finalTokenWasProtected = tokenWasProtected;
+      processedTokens.push({ ...token, protected: tokenWasProtected });
       continue;
     }
 
-    if (index === 0 && comparisonBody.trim() === "---") {
+    if (index === 0 && /^---[ \t]*$/.test(comparisonBody)) {
       inFrontmatter = true;
-      finalTokenWasProtected = true;
+      processedTokens.push({ ...token, protected: true });
+      continue;
+    }
+
+    if (isIndentedCodeLine(comparisonBody)) {
+      inIndentedCode = true;
+      processedTokens.push({ ...token, protected: true });
       continue;
     }
 
     const openedFence = readFenceOpen(comparisonBody);
     if (openedFence) {
       fence = openedFence;
-      finalTokenWasProtected = true;
+      processedTokens.push({ ...token, protected: true });
+      continue;
+    }
+
+    if (isMathBlockDelimiter(comparisonBody)) {
+      inMathBlock = true;
+      processedTokens.push({ ...token, protected: true });
+      continue;
+    }
+
+    const heading = readAtxHeading(token.body);
+    if (heading) {
+      let nextLevel = heading.level;
+      if (options.normalizeHeadingLevels) {
+        nextLevel = normalizeHeadingLevel(
+          heading.level,
+          options.headingStartLevel,
+          headingHierarchy,
+        );
+      }
+
+      const nextText = capitalizeHeadingText(
+        heading.text,
+        options.headingCapitalizationStyle,
+      );
+      if (nextLevel !== heading.level) changes.headingLevelsAdjusted += 1;
+      if (nextText !== heading.text) changes.headingsCapitalized += 1;
+      if (nextLevel !== heading.level || nextText !== heading.text) {
+        token.body = `${heading.indent}${"#".repeat(nextLevel)}${heading.separator}${nextText}${heading.closing}`;
+      }
+    }
+
+    const commentState = scanCommentConstructs(comparisonBody, null);
+    if (commentState.protected) {
+      comment = commentState.comment;
+      processedTokens.push({ ...token, protected: true });
       continue;
     }
 
@@ -338,54 +474,268 @@ export function cleanMarkdown(
     if (protectedState.protected) {
       rawTag = protectedState.rawTag;
       inTemplater = protectedState.inTemplater;
-      finalTokenWasProtected = true;
+      processedTokens.push({ ...token, protected: true });
       continue;
     }
 
-    finalTokenWasProtected = false;
     if (options.cleanWhitespaceOnlyLines && /^[ \t]+$/.test(token.body)) {
       token.body = "";
       changes.whitespaceOnlyLinesCleaned += 1;
-      continue;
-    }
-
-    if (
+    } else if (
       options.trimNonblankTrailingWhitespace &&
       token.body.trim().length > 0
     ) {
       const trailingMatch = token.body.match(/[ \t]+$/);
-      if (!trailingMatch) continue;
-
-      const trailing = trailingMatch[0];
-      const body = token.body.slice(0, -trailing.length);
-      const replacement = /^ {2,}$/.test(trailing) ? "  " : "";
-      const nextBody = `${body}${replacement}`;
-      if (nextBody !== token.body) {
-        token.body = nextBody;
-        changes.nonblankTrailingWhitespaceLinesCleaned += 1;
+      if (trailingMatch) {
+        const trailing = trailingMatch[0];
+        const body = token.body.slice(0, -trailing.length);
+        const replacement = /^ {2,}$/.test(trailing) ? "  " : "";
+        const nextBody = `${body}${replacement}`;
+        if (nextBody !== token.body) {
+          token.body = nextBody;
+          changes.nonblankTrailingWhitespaceLinesCleaned += 1;
+        }
       }
     }
+
+    processedTokens.push({ ...token, protected: false });
+  }
+
+  const retainedTokens: ProcessedLineToken[] = [];
+  let previousWasCollapsibleBlank = false;
+  for (const token of processedTokens) {
+    const blank = token.body.trim().length === 0;
+    const collapsibleBlank = blank && !token.protected;
+    if (
+      options.collapseConsecutiveBlankLines &&
+      collapsibleBlank &&
+      previousWasCollapsibleBlank
+    ) {
+      changes.extraBlankLinesRemoved += 1;
+      continue;
+    }
+
+    retainedTokens.push(token);
+    previousWasCollapsibleBlank = collapsibleBlank;
   }
 
   if (
     options.ensureFinalNewline &&
-    input.length > 0 &&
-    tokens.length > 0 &&
-    !finalTokenWasProtected
+    workingInput.length > 0 &&
+    retainedTokens.length > 0 &&
+    !retainedTokens.at(-1)?.protected
   ) {
-    const last = tokens[tokens.length - 1];
+    const last = retainedTokens.at(-1);
     if (last && last.ending === "") {
-      last.ending = preferredLineEnding(tokens);
+      last.ending = preferredLineEnding(retainedTokens);
       changes.finalNewlineAdded = true;
     }
   }
 
-  const output = tokens.map((token) => `${token.body}${token.ending}`).join("");
+  const output = retainedTokens
+    .map((token) => `${token.body}${token.ending}`)
+    .join("");
   return {
     output,
     changed: output !== input,
     changes,
   };
+}
+
+interface DocumentFrontmatterSortResult {
+  output: string;
+  fieldsReordered: number;
+  skippedReason: string | null;
+}
+
+function sortDocumentFrontmatter(
+  input: string,
+  priorityKeys: readonly string[],
+): DocumentFrontmatterSortResult {
+  const tokens = splitLinesPreservingEndings(input);
+  const first = tokens[0];
+  if (
+    !first ||
+    !/^---[ \t]*$/.test(first.body.replace(/^\uFEFF/, ""))
+  ) {
+    return { output: input, fieldsReordered: 0, skippedReason: null };
+  }
+
+  const closingIndex = tokens.findIndex(
+    (token, index) =>
+      index > 0 && /^(?:---|\.\.\.)[ \t]*$/.test(token.body),
+  );
+  if (closingIndex < 0) {
+    return {
+      output: input,
+      fieldsReordered: 0,
+      skippedReason: "the frontmatter block is not closed",
+    };
+  }
+
+  const body = tokens
+    .slice(1, closingIndex)
+    .map((token) => `${token.body}${token.ending}`)
+    .join("");
+  if (body.trim().length === 0) {
+    return { output: input, fieldsReordered: 0, skippedReason: null };
+  }
+
+  const sorted = sortTopLevelFrontmatterFields(body, priorityKeys);
+  if (sorted.skippedReason) {
+    return {
+      output: input,
+      fieldsReordered: 0,
+      skippedReason: sorted.skippedReason,
+    };
+  }
+  if (!sorted.changed) {
+    return { output: input, fieldsReordered: 0, skippedReason: null };
+  }
+
+  const before = tokens
+    .slice(0, 1)
+    .map((token) => `${token.body}${token.ending}`)
+    .join("");
+  const after = tokens
+    .slice(closingIndex)
+    .map((token) => `${token.body}${token.ending}`)
+    .join("");
+  return {
+    output: `${before}${sorted.output}${after}`,
+    fieldsReordered: sorted.fieldsReordered,
+    skippedReason: null,
+  };
+}
+
+interface AtxHeading {
+  indent: string;
+  level: number;
+  separator: string;
+  text: string;
+  closing: string;
+}
+
+function readAtxHeading(line: string): AtxHeading | null {
+  const match = line.match(
+    /^( {0,3})(#{1,6})([ \t]+)(.*?)([ \t]+#{1,}[ \t]*)?$/,
+  );
+  if (!match?.[1] && match?.[1] !== "") return null;
+  const marker = match[2];
+  const separator = match[3];
+  const text = match[4];
+  if (!marker || !separator || text === undefined) return null;
+  return {
+    indent: match[1],
+    level: marker.length,
+    separator,
+    text,
+    closing: match[5] ?? "",
+  };
+}
+
+function normalizeHeadingLevel(
+  sourceLevel: number,
+  startLevel: 1 | 2,
+  hierarchy: NormalizedHeadingLevel[],
+): number {
+  const current = hierarchy.at(-1);
+  if (!current) {
+    hierarchy.push({ source: sourceLevel, target: startLevel });
+    return startLevel;
+  }
+
+  if (sourceLevel > current.source) {
+    const target = Math.min(6, current.target + 1);
+    hierarchy.push({ source: sourceLevel, target });
+    return target;
+  }
+
+  if (sourceLevel === current.source) {
+    return current.target;
+  }
+
+  let previousTarget: number | null = null;
+  for (let index = hierarchy.length - 1; index >= 0; index -= 1) {
+    const entry = hierarchy[index];
+    if (entry?.source !== sourceLevel) continue;
+    previousTarget = entry.target;
+    break;
+  }
+  while (
+    hierarchy.length > 0 &&
+    (hierarchy.at(-1)?.source ?? 0) >= sourceLevel
+  ) {
+    hierarchy.pop();
+  }
+
+  const parent = hierarchy.at(-1);
+  const target =
+    previousTarget ??
+    (parent ? Math.min(6, parent.target + 1) : startLevel);
+  hierarchy.push({ source: sourceLevel, target });
+  return target;
+}
+
+function capitalizeHeadingText(
+  text: string,
+  style: HeadingCapitalizationStyle,
+): string {
+  if (style === "off" || !isPlainHeadingText(text)) return text;
+  if (style === "first-letter") return capitalizeFirstLetter(text);
+
+  const matches = [...text.matchAll(/\p{L}[\p{L}\p{M}'’.-]*/gu)];
+  if (matches.length === 0) return text;
+  let cursor = 0;
+  let output = "";
+  matches.forEach((match, index) => {
+    const word = match[0];
+    const start = match.index ?? cursor;
+    output += text.slice(cursor, start);
+    output += titleCaseWord(word, index, matches.length);
+    cursor = start + word.length;
+  });
+  return output + text.slice(cursor);
+}
+
+function isPlainHeadingText(text: string): boolean {
+  return !(
+    /\[|\]|`|%%|<%|%>|<[^>]+>|\{\{|\}\}|::|\$|@/.test(text) ||
+    /\\[()[\]]/.test(text) ||
+    /(?:^|\s)#[\p{L}\p{N}_/-]+/u.test(text) ||
+    /\b[\p{L}][\p{L}\p{N}+.-]*:\/\//u.test(text) ||
+    /(?:^|\s)\^[\p{L}\p{N}-]+[ \t]*$/u.test(text)
+  );
+}
+
+function capitalizeFirstLetter(text: string): string {
+  const match = /\p{L}/u.exec(text);
+  if (!match || match.index < 0) return text;
+  const letter = match[0];
+  const uppercase = letter.toLocaleUpperCase();
+  if (uppercase === letter) return text;
+  return `${text.slice(0, match.index)}${uppercase}${text.slice(match.index + letter.length)}`;
+}
+
+function titleCaseWord(
+  word: string,
+  index: number,
+  wordCount: number,
+): string {
+  const lowercase = word.toLocaleLowerCase();
+  if (word !== lowercase) return word;
+  if (
+    index > 0 &&
+    index < wordCount - 1 &&
+    TITLE_CASE_MINOR_WORDS.has(lowercase)
+  ) {
+    return word;
+  }
+  return word.replace(
+    /(^|[-–—])(\p{Ll})/gu,
+    (_match, prefix: string, letter: string) =>
+      `${prefix}${letter.toLocaleUpperCase()}`,
+  );
 }
 
 function invalidFilenamePlan(
@@ -482,9 +832,17 @@ function readFenceOpen(line: string): FenceState | null {
   };
 }
 
+function isIndentedCodeLine(line: string): boolean {
+  return /^(?: {4,}| {0,3}\t)/.test(line) && line.trim().length > 0;
+}
+
 function isFenceClose(line: string, fence: FenceState): boolean {
   const marker = fence.marker === "`" ? "`" : "~";
   return new RegExp(`^ {0,3}${marker}{${fence.length},}[ \\t]*$`).test(line);
+}
+
+function isMathBlockDelimiter(line: string): boolean {
+  return /^ {0,3}\$\$[ \t]*$/.test(line);
 }
 
 function scanInlineProtectedConstructs(
@@ -540,6 +898,52 @@ function scanInlineProtectedConstructs(
     inTemplater,
     protected: protectedLine,
   };
+}
+
+function scanCommentConstructs(
+  line: string,
+  initialComment: MarkdownComment | null,
+): CommentProtectedState {
+  let comment = initialComment;
+  let cursor = 0;
+  let protectedLine = comment !== null;
+
+  while (cursor < line.length) {
+    if (comment === "obsidian") {
+      const closeIndex = line.indexOf("%%", cursor);
+      if (closeIndex < 0) {
+        return { comment, protected: true };
+      }
+      cursor = closeIndex + 2;
+      comment = null;
+      continue;
+    }
+
+    if (comment === "html") {
+      const closeIndex = line.indexOf("-->", cursor);
+      if (closeIndex < 0) {
+        return { comment, protected: true };
+      }
+      cursor = closeIndex + 3;
+      comment = null;
+      continue;
+    }
+
+    const obsidianOpen = line.indexOf("%%", cursor);
+    const htmlOpen = line.indexOf("<!--", cursor);
+    if (obsidianOpen < 0 && htmlOpen < 0) break;
+
+    protectedLine = true;
+    if (obsidianOpen >= 0 && (htmlOpen < 0 || obsidianOpen < htmlOpen)) {
+      comment = "obsidian";
+      cursor = obsidianOpen + 2;
+    } else {
+      comment = "html";
+      cursor = htmlOpen + 4;
+    }
+  }
+
+  return { comment, protected: protectedLine };
 }
 
 function findRawTagOpen(

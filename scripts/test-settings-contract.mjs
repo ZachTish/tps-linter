@@ -11,13 +11,14 @@ const versions = JSON.parse(readFileSync(new URL("../versions.json", import.meta
 const mainSource = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
 const settingsTabSource = readFileSync(new URL("../src/settings-tab.ts", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+const esbuildSource = readFileSync(new URL("../esbuild.config.mjs", import.meta.url), "utf8");
 const allSource = readTypeScriptTree(sourceRoot);
 
 test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.1.0",
+    version: "0.2.0",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with explicit, ownership-safe actions.",
     author: "Zach Tisherman",
@@ -28,9 +29,13 @@ test("TPS Linter release metadata is aligned", () => {
   assert.equal(packageJson.version, manifest.version);
   assert.equal(packageJson.type, "module");
   assert.equal(packageJson.license, "MIT");
+  assert.equal(packageJson.dependencies?.yaml, "2.9.0");
   assert.deepEqual(versions, {
     "0.1.0": "1.10.0",
+    "0.2.0": "1.10.0",
   });
+  assert.match(esbuildSource, /Copyright Eemeli Aro/);
+  assert.match(esbuildSource, /Permission to use, copy, modify/);
 });
 
 test("TPS Linter exposes explicit check and clean commands", () => {
@@ -58,25 +63,41 @@ test("TPS Linter keeps automatic filename ownership with GCM", () => {
   );
 });
 
+test("TPS Linter follows GCM frontmatter priority without invoking its mutator", () => {
+  assert.match(mainSource, /settings\?\.properties/);
+  assert.match(mainSource, /getFrontmatterPriorityKeys/);
+  assert.match(allSource, /status[\s\S]*priority[\s\S]*tags[\s\S]*recurrence[\s\S]*scheduled[\s\S]*folderPath/);
+  assert.doesNotMatch(allSource, /frontmatterMutationService/);
+  assert.doesNotMatch(allSource, /processFrontMatter/);
+  assert.match(allSource, /sortTopLevelFrontmatterFields/);
+  assert.match(allSource, /Semantic verification failed/);
+});
+
 test("TPS Linter mutations use Obsidian-owned atomic operations", () => {
   assert.match(allSource, /\.vault\.process\(/, "note cleanup must use Vault.process");
   assert.match(allSource, /\.fileManager\.renameFile\(/, "filename cleanup must use fileManager.renameFile");
 });
 
-test("TPS Linter settings stay flat, accessible, responsive, and namespaced", () => {
+test("TPS Linter settings destinations stay accessible, responsive, and namespaced", () => {
   assert.match(settingsTabSource, /tps-linter-settings-actions/);
   assert.match(settingsTabSource, /tps-linter-settings-ownership/);
   assert.doesNotMatch(settingsTabSource, /createEl\(\s*["']details["']/);
   assert.doesNotMatch(settingsTabSource, /createEl\(\s*["']summary["']/);
-  assert.doesNotMatch(settingsTabSource, /Choose what to configure/);
+  assert.match(settingsTabSource, /Choose what to configure/);
+  assert.match(settingsTabSource, /activeDestination: SettingsDestination = "clean-notes"/);
+  assert.match(settingsTabSource, /"aria-pressed"/);
+  assert.match(settingsTabSource, /routeButtons\.get\(destination\.id\)\?\.focus\(\)/);
+  for (const label of ["Clean notes", "Headings", "Frontmatter", "Files & safety"]) {
+    assert.match(settingsTabSource, new RegExp(`label: "${label}"`));
+  }
 
   assert.match(stylesSource, /\.tps-linter-settings-actions/);
   assert.match(stylesSource, /\.tps-linter-settings-ownership/);
-  assert.match(stylesSource, /button:focus-visible/);
+  assert.match(stylesSource, /\.tps-linter-settings-route:focus-visible/);
   assert.match(stylesSource, /@media \(max-width: 640px\)/);
   assert.match(
     stylesSource,
-    /@media \(max-width: 640px\)[\s\S]*\.tps-linter-settings-actions[\s\S]*flex-direction:\s*column/,
+    /@media \(max-width: 640px\)[\s\S]*\.tps-linter-settings-route-strip[\s\S]*overflow-x:\s*auto/,
   );
   assert.doesNotMatch(stylesSource, /(?:^|\n)\.tps-settings-/);
 

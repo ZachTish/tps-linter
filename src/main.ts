@@ -14,6 +14,7 @@ import {
   planMarkdownFilename,
   type FilenamePlan,
   type FilenameRenameDecision,
+  type MarkdownCleanupOptions,
   type MarkdownCleanupResult,
 } from "./cleaner";
 import {
@@ -24,6 +25,7 @@ import {
 } from "./logger";
 import {
   normalizeSettings,
+  resolveFrontmatterPriorityKeys,
   type TPSLinterSettings,
 } from "./settings";
 import { TPSLinterSettingTab } from "./settings-tab";
@@ -51,6 +53,9 @@ interface PluginManagerLike {
 interface GcmPluginLike {
   settings?: {
     enableAutoRename?: boolean;
+    properties?: Array<{
+      key?: unknown;
+    }>;
   };
 }
 
@@ -123,11 +128,13 @@ export default class TPSLinterPlugin extends Plugin {
   }
 
   isGcmAutoRenameActive(): boolean {
-    const plugins = (this.app as App & { plugins?: PluginManagerLike }).plugins;
-    const gcm = plugins?.getPlugin?.(
-      "tps-global-context-menu",
-    ) as GcmPluginLike | null | undefined;
-    return gcm?.settings?.enableAutoRename === true;
+    return this.getGcmPlugin()?.settings?.enableAutoRename === true;
+  }
+
+  getFrontmatterPriorityKeys(): string[] {
+    return resolveFrontmatterPriorityKeys(
+      this.getGcmPlugin()?.settings?.properties,
+    );
   }
 
   async checkActiveNote(
@@ -308,16 +315,20 @@ export default class TPSLinterPlugin extends Plugin {
     );
   }
 
-  private markdownOptions(): {
-    cleanWhitespaceOnlyLines: boolean;
-    trimNonblankTrailingWhitespace: boolean;
-    ensureFinalNewline: boolean;
-  } {
+  private markdownOptions(): MarkdownCleanupOptions {
     return {
       cleanWhitespaceOnlyLines: this.settings.cleanWhitespaceOnlyLines,
+      collapseConsecutiveBlankLines:
+        this.settings.collapseConsecutiveBlankLines,
       trimNonblankTrailingWhitespace:
         this.settings.trimNonblankTrailingWhitespace,
       ensureFinalNewline: this.settings.ensureFinalNewline,
+      headingCapitalizationStyle:
+        this.settings.headingCapitalizationStyle,
+      normalizeHeadingLevels: this.settings.normalizeHeadingLevels,
+      headingStartLevel: this.settings.headingStartLevel,
+      sortFrontmatterFields: this.settings.sortFrontmatterFields,
+      frontmatterPriorityKeys: this.getFrontmatterPriorityKeys(),
     };
   }
 
@@ -343,9 +354,10 @@ export default class TPSLinterPlugin extends Plugin {
           result.filenameDecision,
           true,
         );
-    const markdown = result.contentChanged
-      ? this.describeMarkdown(result.inspection.markdown, true)
-      : "Markdown is already clean.";
+    const markdown = this.describeMarkdown(
+      result.inspection.markdown,
+      result.contentChanged,
+    );
     return `${filename} ${markdown}`;
   }
 
@@ -380,15 +392,29 @@ export default class TPSLinterPlugin extends Plugin {
     result: MarkdownCleanupResult,
     applied: boolean,
   ): string {
-    if (!result.changed) return "Markdown is already clean.";
+    const skippedReason = result.changes.frontmatterSortSkippedReason;
+    if (!result.changed) {
+      return skippedReason
+        ? `Markdown is unchanged. Frontmatter sorting was skipped because ${skippedReason}.`
+        : "Markdown is already clean.";
+    }
 
     const actions: string[] = [];
     const whitespaceLines = result.changes.whitespaceOnlyLinesCleaned;
+    const blankLines = result.changes.extraBlankLinesRemoved;
     const trailingLines =
       result.changes.nonblankTrailingWhitespaceLinesCleaned;
+    const capitalizedHeadings = result.changes.headingsCapitalized;
+    const adjustedHeadingLevels = result.changes.headingLevelsAdjusted;
+    const reorderedFields = result.changes.frontmatterFieldsReordered;
     if (whitespaceLines > 0) {
       actions.push(
         `${applied ? "cleared" : "clear"} ${whitespaceLines} whitespace-only ${plural("line", whitespaceLines)}`,
+      );
+    }
+    if (blankLines > 0) {
+      actions.push(
+        `${applied ? "removed" : "remove"} ${blankLines} extra blank ${plural("line", blankLines)}`,
       );
     }
     if (trailingLines > 0) {
@@ -396,11 +422,38 @@ export default class TPSLinterPlugin extends Plugin {
         `${applied ? "trimmed" : "trim"} trailing whitespace on ${trailingLines} ${plural("line", trailingLines)}`,
       );
     }
+    if (capitalizedHeadings > 0) {
+      actions.push(
+        `${applied ? "capitalized" : "capitalize"} ${capitalizedHeadings} ${plural("heading", capitalizedHeadings)}`,
+      );
+    }
+    if (adjustedHeadingLevels > 0) {
+      actions.push(
+        `${applied ? "adjusted" : "adjust"} ${adjustedHeadingLevels} heading ${plural("level", adjustedHeadingLevels)}`,
+      );
+    }
+    if (reorderedFields > 0) {
+      actions.push(
+        `${applied ? "reordered" : "reorder"} ${reorderedFields} frontmatter ${plural("field", reorderedFields)}`,
+      );
+    }
     if (result.changes.finalNewlineAdded) {
       actions.push(applied ? "added a final newline" : "add a final newline");
     }
 
-    return `Markdown ${applied ? "was cleaned" : "would change"}: ${joinActions(actions)}.`;
+    const summary = `Markdown ${applied ? "was cleaned" : "would change"}: ${joinActions(actions)}.`;
+    return skippedReason
+      ? `${summary} Frontmatter sorting was skipped because ${skippedReason}.`
+      : summary;
+  }
+
+  private getGcmPlugin(): GcmPluginLike | null {
+    const plugins = (this.app as App & { plugins?: PluginManagerLike }).plugins;
+    return (
+      (plugins?.getPlugin?.(
+        "tps-global-context-menu",
+      ) as GcmPluginLike | null | undefined) ?? null
+    );
   }
 
   private finish(
