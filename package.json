@@ -1,0 +1,27 @@
+{
+  "name": "tps-linter",
+  "version": "0.1.0",
+  "description": "TPS-specific note and filename cleanup for Obsidian.",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "test:unit": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:settings": "node --test scripts/test-settings-contract.mjs",
+    "test": "npm run test:unit && npm run test:settings && npm run build"
+  },
+  "keywords": [
+    "obsidian",
+    "tps",
+    "linter"
+  ],
+  "author": "Zach Tisherman",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.15.17",
+    "esbuild": "0.25.5",
+    "obsidian": "latest",
+    "typescript": "^5.8.3"
+  }
+}

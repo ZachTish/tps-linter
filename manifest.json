@@ -1,0 +1,10 @@
+{
+  "id": "tps-linter",
+  "name": "TPS Linter",
+  "version": "0.1.0",
+  "minAppVersion": "1.10.0",
+  "description": "TPS-specific note and filename cleanup with explicit, ownership-safe actions.",
+  "author": "Zach Tisherman",
+  "authorUrl": "https://github.com/ZachTish",
+  "isDesktopOnly": false
+}
