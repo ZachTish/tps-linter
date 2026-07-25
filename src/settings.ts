@@ -1,4 +1,4 @@
-export const SETTINGS_SCHEMA_VERSION = 3 as const;
+export const SETTINGS_SCHEMA_VERSION = 4 as const;
 
 export type FilenameUnsafeCharacterStyle = "space" | "dash" | "remove";
 export type HeadingCapitalizationStyle =
@@ -9,11 +9,13 @@ export type HeadingStartLevel = 1 | 2;
 
 export interface TPSLinterSettings {
   schemaVersion: typeof SETTINGS_SCHEMA_VERSION;
+  cleanFilenames: boolean;
   filenameUnsafeCharacterStyle: FilenameUnsafeCharacterStyle;
   removeObsidianLinkCharacters: boolean;
   cleanWhitespaceOnlyLines: boolean;
   collapseConsecutiveBlankLines: boolean;
   trimNonblankTrailingWhitespace: boolean;
+  removeTrailingBlankLines: boolean;
   ensureFinalNewline: boolean;
   headingCapitalizationStyle: HeadingCapitalizationStyle;
   normalizeHeadingLevels: boolean;
@@ -50,11 +52,13 @@ export const DEFAULT_TPS_FRONTMATTER_PRIORITY_KEYS = Object.freeze([
 
 export const DEFAULT_SETTINGS: ReadonlyTPSLinterSettings = Object.freeze({
   schemaVersion: SETTINGS_SCHEMA_VERSION,
+  cleanFilenames: true,
   filenameUnsafeCharacterStyle: "space",
   removeObsidianLinkCharacters: false,
   cleanWhitespaceOnlyLines: true,
   collapseConsecutiveBlankLines: true,
   trimNonblankTrailingWhitespace: false,
+  removeTrailingBlankLines: false,
   ensureFinalNewline: true,
   headingCapitalizationStyle: "first-letter",
   normalizeHeadingLevels: true,
@@ -89,6 +93,10 @@ export function normalizeSettings(loadedData: unknown): TPSLinterSettings {
 
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
+    cleanFilenames: readBoolean(
+      data.cleanFilenames,
+      DEFAULT_SETTINGS.cleanFilenames,
+    ),
     filenameUnsafeCharacterStyle: isFilenameUnsafeCharacterStyle(
       data.filenameUnsafeCharacterStyle,
     )
@@ -109,6 +117,10 @@ export function normalizeSettings(loadedData: unknown): TPSLinterSettings {
     trimNonblankTrailingWhitespace: readBoolean(
       data.trimNonblankTrailingWhitespace,
       DEFAULT_SETTINGS.trimNonblankTrailingWhitespace,
+    ),
+    removeTrailingBlankLines: readBoolean(
+      data.removeTrailingBlankLines,
+      DEFAULT_SETTINGS.removeTrailingBlankLines,
     ),
     ensureFinalNewline: readBoolean(
       data.ensureFinalNewline,

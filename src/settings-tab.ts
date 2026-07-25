@@ -1,4 +1,10 @@
-import { App, ButtonComponent, PluginSettingTab, Setting } from "obsidian";
+import {
+  App,
+  ButtonComponent,
+  Notice,
+  PluginSettingTab,
+  Setting,
+} from "obsidian";
 
 import type TPSLinterPlugin from "./main";
 import type {
@@ -84,6 +90,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
         this.renderOwnership(destination);
         this.renderFilenameRules(destination);
         this.renderScope(destination);
+        this.renderNoteLocalControls(destination);
         this.renderDiagnostics(destination);
         break;
     }
@@ -151,6 +158,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
   }
 
   private renderOwnership(parent: HTMLElement): void {
+    const ownershipStatus = this.plugin.getGcmFilenameOwnership();
     const ownership = parent.createDiv({ cls: "tps-linter-settings-ownership" });
     const copy = ownership.createDiv({ cls: "tps-linter-settings-ownership-copy" });
     copy.createEl("strong", { text: "Automatic filename ownership" });
@@ -158,9 +166,12 @@ export class TPSLinterSettingTab extends PluginSettingTab {
       text: "TPS Global Context Menu currently owns automatic title and filename synchronization.",
     });
     copy.createSpan({
-      text: this.plugin.isGcmAutoRenameActive()
-        ? "Its automatic rename setting is active, so TPS Linter will check but not rename filenames."
-        : "TPS Linter can apply an explicit manual filename cleanup when GCM automatic rename is inactive.",
+      text:
+        ownershipStatus === "gcm-active"
+          ? "Its automatic rename setting is active, so TPS Linter will check but not rename filenames."
+          : ownershipStatus === "unavailable"
+            ? "TPS Linter cannot safely verify GCM's filename ownership right now, so filename changes will fail closed."
+            : "TPS Linter can apply an explicit manual filename cleanup when GCM automatic rename is inactive or GCM is not loaded.",
     });
 
     const controls = ownership.createDiv({ cls: "tps-linter-settings-ownership-actions" });
@@ -172,6 +183,18 @@ export class TPSLinterSettingTab extends PluginSettingTab {
 
   private renderFilenameRules(parent: HTMLElement): void {
     parent.createEl("h3", { text: "Filename rules" });
+
+    new Setting(parent)
+      .setName("Clean filenames")
+      .setDesc("Allow an explicit Clean action to apply an eligible filename plan. Turn this off to lint note content only.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.cleanFilenames)
+          .onChange(async (value) => {
+            this.plugin.settings.cleanFilenames = value;
+            await this.plugin.saveSettings();
+          });
+      });
 
     new Setting(parent)
       .setName("Unsafe character replacement")
@@ -248,6 +271,18 @@ export class TPSLinterSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.ensureFinalNewline)
           .onChange(async (value) => {
             this.plugin.settings.ensureFinalNewline = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(parent)
+      .setName("Remove trailing blank lines")
+      .setDesc("Remove unprotected blank padding at the end of a note while retaining exactly one final newline. Off preserves existing terminal blank lines.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.removeTrailingBlankLines)
+          .onChange(async (value) => {
+            this.plugin.settings.removeTrailingBlankLines = value;
             await this.plugin.saveSettings();
           });
       });
@@ -398,6 +433,42 @@ export class TPSLinterSettingTab extends PluginSettingTab {
       });
   }
 
+  private renderNoteLocalControls(parent: HTMLElement): void {
+    parent.createEl("h3", { text: "Note-local controls" });
+    const reference = parent.createDiv({
+      cls: "tps-linter-settings-reference",
+    });
+    const switchCopy = reference.createEl("p");
+    switchCopy.appendText("Use ");
+    switchCopy.createEl("code", { text: "tps-linter: false" });
+    switchCopy.appendText(
+      " in top-level frontmatter to disable every rule for one note. Use ",
+    );
+    switchCopy.createEl("code", {
+      text: "tps-linter-disabled-rules",
+    });
+    switchCopy.appendText(" to disable selected stable rule IDs.");
+    const ruleCopy = reference.createEl("p");
+    ruleCopy.appendText("Rule IDs: ");
+    ruleCopy.createEl("code", {
+      text: "filename, whitespace-only-lines, blank-lines, trailing-whitespace, trailing-blank-lines, final-newline, heading-capitalization, heading-levels, frontmatter-sort, all",
+    });
+    ruleCopy.appendText(".");
+
+    const rangeCopy = reference.createEl("p");
+    rangeCopy.appendText("Protect an exact body range with standalone ");
+    rangeCopy.createEl("code", {
+      text: "<!-- tps-linter-disable -->",
+    });
+    rangeCopy.appendText(" and ");
+    rangeCopy.createEl("code", {
+      text: "<!-- tps-linter-enable -->",
+    });
+    rangeCopy.appendText(
+      " markers; Obsidian %% marker forms are also supported. Invalid controls fail closed.",
+    );
+  }
+
   private async runAction(action: () => Promise<string>): Promise<void> {
     if (this.statusEl) this.statusEl.setText("Working…");
     try {
@@ -416,8 +487,15 @@ export class TPSLinterSettingTab extends PluginSettingTab {
         openTabById?: (id: string) => void;
       };
     }).setting;
-    settings?.open?.();
-    settings?.openTabById?.(pluginId);
+    if (!settings?.open || !settings.openTabById) {
+      new Notice(
+        "TPS Linter could not open that plugin's settings in this Obsidian version.",
+        7000,
+      );
+      return;
+    }
+    settings.open();
+    settings.openTabById(pluginId);
   }
 
   private focusSettingControl(settingName: string): void {

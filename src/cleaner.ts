@@ -1,4 +1,10 @@
 import { sortTopLevelFrontmatterFields } from "./frontmatter-sort.ts";
+import type { FilenameOwnershipStatus } from "./gcm-compat.ts";
+import {
+  TPS_LINTER_RULE_IDS,
+  parseLintControls,
+  type TPSLinterRuleId,
+} from "./lint-controls.ts";
 import type {
   FilenameUnsafeCharacterStyle,
   HeadingCapitalizationStyle,
@@ -25,8 +31,14 @@ export type FilenameRenameDecisionReason =
   | "no-change"
   | "invalid-plan"
   | "case-only-rename"
+  | "filename-cleaning-disabled"
   | "gcm-auto-rename-active"
-  | "target-collision";
+  | "gcm-ownership-unavailable"
+  | "target-collision"
+  | "note-disabled"
+  | "note-rule-disabled"
+  | "path-excluded"
+  | "rename-failed";
 
 export interface FilenameRenameDecision {
   allowed: boolean;
@@ -38,6 +50,7 @@ export interface MarkdownCleanupOptions {
   cleanWhitespaceOnlyLines: boolean;
   collapseConsecutiveBlankLines: boolean;
   trimNonblankTrailingWhitespace: boolean;
+  removeTrailingBlankLines: boolean;
   ensureFinalNewline: boolean;
   headingCapitalizationStyle: HeadingCapitalizationStyle;
   normalizeHeadingLevels: boolean;
@@ -51,6 +64,7 @@ export interface MarkdownCleanupChanges {
   whitespaceOnlyLinesCleaned: number;
   extraBlankLinesRemoved: number;
   nonblankTrailingWhitespaceLinesCleaned: number;
+  trailingBlankLinesRemoved: number;
   headingsCapitalized: number;
   headingLevelsAdjusted: number;
   frontmatterFieldsReordered: number;
@@ -62,6 +76,9 @@ export interface MarkdownCleanupResult {
   output: string;
   changed: boolean;
   changes: MarkdownCleanupChanges;
+  disabledRules: TPSLinterRuleId[];
+  noteDisabledReason: string | null;
+  safetyBlockedReason: string | null;
 }
 
 export interface PathExclusion {
@@ -82,6 +99,7 @@ interface ProcessedLineToken extends LineToken {
 interface FenceState {
   marker: "`" | "~";
   length: number;
+  containerPath: ContainerStep[];
 }
 
 interface NormalizedHeadingLevel {
@@ -93,25 +111,93 @@ interface VisibleHeading {
   sourceLevel: number;
 }
 
-type RawProtectedTag = "pre" | "textarea" | "script" | "style";
 type MarkdownComment = "obsidian" | "html";
+type HtmlDelimitedConstruct =
+  | "processing-instruction"
+  | "declaration"
+  | "cdata";
+type RawHtmlTag = "pre" | "script" | "style" | "textarea";
 
-interface InlineProtectedState {
-  rawTag: RawProtectedTag | null;
-  inTemplater: boolean;
-  protected: boolean;
-}
-
-interface CommentProtectedState {
+interface ProtectedConstructState {
   comment: MarkdownComment | null;
-  protected: boolean;
+  inTemplater: boolean;
+  htmlDelimited: HtmlDelimitedConstruct | null;
+  codeSpanTicks: number | null;
+  rawHtmlTag: RawHtmlTag | null;
+  htmlTags: string[];
+  referenceTitleMayContinue: boolean;
 }
+
+interface ProtectedConstructScan extends ProtectedConstructState {
+  protected: boolean;
+  safetyBlockedReason?: string;
+}
+
+interface ProtectedSyntaxBudget {
+  remaining: number;
+}
+
+interface HtmlTagToken {
+  index: number;
+  end: number;
+  name: string;
+  closing: boolean;
+  selfClosing: boolean;
+  complete: boolean;
+}
+
+type ContainerStep =
+  | { kind: "blockquote" }
+  | { kind: "list"; indent: number };
+
+interface DelimiterCandidate {
+  content: string;
+  containerPath: ContainerStep[];
+  column: number;
+}
+
+interface MathBlockState {
+  containerPath: ContainerStep[];
+}
+
+type ProtectedToken =
+  | {
+      kind: "obsidian-comment" | "html-comment" | "templater";
+      index: number;
+      end: number;
+    }
+  | {
+      kind: "html-delimited";
+      index: number;
+      end: number;
+      construct: HtmlDelimitedConstruct;
+    }
+  | {
+      kind: "code-span";
+      index: number;
+      end: number;
+      ticks: number;
+    }
+  | {
+      kind: "inline-opaque";
+      index: number;
+      end: number;
+      referenceTitleMayContinue?: boolean;
+      protectLine?: boolean;
+    }
+  | {
+      kind: "unsafe";
+      index: number;
+      end: number;
+      reason: string;
+    }
+  | ({ kind: "html-tag" } & HtmlTagToken);
 
 const WINDOWS_RESERVED_DEVICE_NAME =
-  /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
-const UNSAFE_FILENAME_CHARACTERS = /[\u0000-\u001f\u007f<>:"/\\|?*]+/g;
+  /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?$/i;
+const UNSAFE_FILENAME_CHARACTERS = /[\p{Cc}<>:"/\\|?*]+/gu;
 const OBSIDIAN_LINK_CONTROL_CHARACTERS = /[#^[\]]+/g;
-const HORIZONTAL_FILENAME_WHITESPACE = /[\t\p{Zs}]+/gu;
+const HORIZONTAL_FILENAME_WHITESPACE = /[\t\p{Z}]+/gu;
 
 const HARD_EXCLUDED_PREFIXES = [
   ".obsidian",
@@ -141,6 +227,36 @@ const TITLE_CASE_MINOR_WORDS = new Set([
   "via",
   "with",
 ]);
+const HTML_VOID_TAGS = new Set([
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "param",
+  "source",
+  "track",
+  "wbr",
+]);
+const RAW_HTML_TAGS = new Set<RawHtmlTag>([
+  "pre",
+  "script",
+  "style",
+  "textarea",
+]);
+export const MARKDOWN_SAFETY_LIMITS = Object.freeze({
+  maxCharacters: 2_000_000,
+  maxLines: 50_000,
+  maxLineCharacters: 32_000,
+  maxProtectedTokensPerLine: 2_048,
+  maxProtectedTokensPerDocument: 4_096,
+  maxContainerDepth: 64,
+});
 
 export function planMarkdownFilename(
   sourcePath: string,
@@ -214,7 +330,7 @@ export function planMarkdownFilename(
     blockReason = `"${targetBasename}" is a reserved device name.`;
   } else if (
     changed &&
-    targetPath.toLocaleLowerCase() === normalizedSourcePath.toLocaleLowerCase()
+    targetPath.toLowerCase() === normalizedSourcePath.toLowerCase()
   ) {
     blockReason = "Case-only filename changes are not applied automatically.";
   }
@@ -234,8 +350,16 @@ export function planMarkdownFilename(
 export function decideFilenameRename(
   plan: FilenamePlan,
   siblingPaths: readonly string[],
-  gcmAutoRenameActive: boolean,
+  ownership: FilenameOwnershipStatus,
+  filenameCleaningEnabled: boolean,
 ): FilenameRenameDecision {
+  if (!filenameCleaningEnabled) {
+    return {
+      allowed: false,
+      reason: "filename-cleaning-disabled",
+      detail: null,
+    };
+  }
   if (!plan.changed) {
     return { allowed: false, reason: "no-change", detail: null };
   }
@@ -247,8 +371,8 @@ export function decideFilenameRename(
     };
   }
   if (
-    plan.targetPath.toLocaleLowerCase() ===
-    plan.sourcePath.toLocaleLowerCase()
+    plan.targetPath.toLowerCase() ===
+    plan.sourcePath.toLowerCase()
   ) {
     return {
       allowed: false,
@@ -256,21 +380,28 @@ export function decideFilenameRename(
       detail: "Case-only filename changes require an explicit filesystem-safe workflow.",
     };
   }
-  if (gcmAutoRenameActive) {
+  if (ownership === "gcm-active") {
     return {
       allowed: false,
       reason: "gcm-auto-rename-active",
       detail: "TPS Global Context Menu currently owns automatic filename synchronization.",
     };
   }
+  if (ownership === "unavailable") {
+    return {
+      allowed: false,
+      reason: "gcm-ownership-unavailable",
+      detail: "TPS Global Context Menu filename ownership could not be verified.",
+    };
+  }
 
   const sourcePath = normalizeVaultPath(plan.sourcePath);
-  const targetPathLower = normalizeVaultPath(plan.targetPath).toLocaleLowerCase();
+  const targetPathKey = collisionPathKey(plan.targetPath);
   const collision = siblingPaths
     .map(normalizeVaultPath)
     .find(
       (path) =>
-        path !== sourcePath && path.toLocaleLowerCase() === targetPathLower,
+        path !== sourcePath && collisionPathKey(path) === targetPathKey,
     );
   if (collision) {
     return {
@@ -288,14 +419,14 @@ export function inspectPathExclusion(
   configuredPatterns: readonly string[],
 ): PathExclusion {
   const path = normalizeVaultPath(sourcePath);
-  const lowerPath = path.toLocaleLowerCase();
+  const lowerPath = path.toLowerCase();
 
-  if (!path.toLocaleLowerCase().endsWith(".md")) {
+  if (!path.toLowerCase().endsWith(".md")) {
     return { excluded: true, reason: "non-Markdown file" };
   }
 
   for (const prefix of HARD_EXCLUDED_PREFIXES) {
-    if (matchesExactOrDescendant(lowerPath, prefix.toLocaleLowerCase())) {
+    if (matchesExactOrDescendant(lowerPath, prefix.toLowerCase())) {
       return { excluded: true, reason: `protected path: ${prefix}` };
     }
   }
@@ -304,7 +435,7 @@ export function inspectPathExclusion(
     return { excluded: true, reason: "protected root agent instructions" };
   }
 
-  const basename = path.slice(path.lastIndexOf("/") + 1, -3).toLocaleLowerCase();
+  const basename = path.slice(path.lastIndexOf("/") + 1, -3).toLowerCase();
   if (basename === "__type__" || basename === "__root__") {
     return { excluded: true, reason: "protected TPS sentinel" };
   }
@@ -324,10 +455,81 @@ export function cleanMarkdown(
   input: string,
   options: MarkdownCleanupOptions,
 ): MarkdownCleanupResult {
+  const inputSafetyBlock = inspectMarkdownInputSafety(input);
+  if (inputSafetyBlock) {
+    return unchangedMarkdownResult(input, [], null, inputSafetyBlock);
+  }
+
+  const controls = parseLintControls(input);
+  if (controls.disabledAll) {
+    return unchangedMarkdownResult(
+      input,
+      [],
+      controls.reason ?? "TPS Linter is disabled by note-local controls.",
+      null,
+    );
+  }
+
+  const disabledRules = TPS_LINTER_RULE_IDS.filter(
+    (rule): rule is TPSLinterRuleId =>
+      rule !== "all" &&
+      rule !== "filename" &&
+      controls.disabledRules.has(rule),
+  );
+  const first = cleanMarkdownOnce(
+    input,
+    applyDisabledRules(options, controls.disabledRules),
+    disabledRules,
+  );
+  if (!first.changed) return first;
+
+  const verificationControls = parseLintControls(first.output);
+  if (
+    verificationControls.disabledAll ||
+    !sameRuleSet(controls.disabledRules, verificationControls.disabledRules)
+  ) {
+    return unchangedMarkdownResult(
+      input,
+      disabledRules,
+      null,
+      "note-local controls changed during cleanup",
+    );
+  }
+
+  const verification = cleanMarkdownOnce(
+    first.output,
+    applyDisabledRules(options, verificationControls.disabledRules),
+    disabledRules,
+  );
+  if (
+    verification.changed ||
+    verification.noteDisabledReason ||
+    verification.safetyBlockedReason
+  ) {
+    return unchangedMarkdownResult(
+      input,
+      disabledRules,
+      null,
+      verification.safetyBlockedReason
+        ? `post-clean verification was blocked because ${verification.safetyBlockedReason}`
+        : verification.noteDisabledReason
+          ? `post-clean verification was blocked because ${verification.noteDisabledReason}`
+          : "a second cleanup pass would make additional changes",
+    );
+  }
+  return first;
+}
+
+function cleanMarkdownOnce(
+  input: string,
+  options: MarkdownCleanupOptions,
+  disabledRules: TPSLinterRuleId[],
+): MarkdownCleanupResult {
   const changes: MarkdownCleanupChanges = {
     whitespaceOnlyLinesCleaned: 0,
     extraBlankLinesRemoved: 0,
     nonblankTrailingWhitespaceLinesCleaned: 0,
+    trailingBlankLinesRemoved: 0,
     headingsCapitalized: 0,
     headingLevelsAdjusted: 0,
     frontmatterFieldsReordered: 0,
@@ -350,11 +552,21 @@ export function cleanMarkdown(
   const processedTokens: ProcessedLineToken[] = [];
   let inFrontmatter = false;
   let fence: FenceState | null = null;
-  let inMathBlock = false;
+  let mathBlock: MathBlockState | null = null;
   let inIndentedCode = false;
-  let comment: MarkdownComment | null = null;
-  let rawTag: RawProtectedTag | null = null;
-  let inTemplater = false;
+  let lintRangeDisabled = false;
+  let protectedConstructs: ProtectedConstructState = {
+    comment: null,
+    inTemplater: false,
+    htmlDelimited: null,
+    codeSpanTicks: null,
+    rawHtmlTag: null,
+    htmlTags: [],
+    referenceTitleMayContinue: false,
+  };
+  const protectedSyntaxBudget: ProtectedSyntaxBudget = {
+    remaining: MARKDOWN_SAFETY_LIMITS.maxProtectedTokensPerDocument,
+  };
   const headingHierarchy: NormalizedHeadingLevel[] = [];
   const visibleHeadings: VisibleHeading[] = [];
   const pushHeadingHierarchyToH6 =
@@ -366,6 +578,18 @@ export function cleanMarkdown(
     let tokenWasProtected = false;
     const comparisonBody =
       index === 0 ? token.body.replace(/^\uFEFF/, "") : token.body;
+
+    if (protectedConstructs.referenceTitleMayContinue) {
+      protectedConstructs.referenceTitleMayContinue = false;
+      if (/^ {0,3}(?:"|'|\()/.test(comparisonBody)) {
+        return unchangedMarkdownResult(
+          input,
+          disabledRules,
+          null,
+          "multiline Markdown reference titles require manual review",
+        );
+      }
+    }
 
     if (inFrontmatter) {
       tokenWasProtected = true;
@@ -383,16 +607,18 @@ export function cleanMarkdown(
       continue;
     }
 
-    if (inMathBlock) {
+    if (mathBlock) {
       tokenWasProtected = true;
-      if (isMathBlockDelimiter(comparisonBody)) inMathBlock = false;
+      if (isMathBlockClose(comparisonBody, mathBlock)) {
+        mathBlock = null;
+      }
       processedTokens.push({ ...token, protected: tokenWasProtected });
       continue;
     }
 
     if (inIndentedCode) {
       if (
-        comparisonBody.trim().length === 0 ||
+        isBlankMarkdownContainerLine(comparisonBody) ||
         isIndentedCodeLine(comparisonBody)
       ) {
         processedTokens.push({ ...token, protected: true });
@@ -401,23 +627,34 @@ export function cleanMarkdown(
       inIndentedCode = false;
     }
 
-    if (comment) {
-      const commentState = scanCommentConstructs(comparisonBody, comment);
-      comment = commentState.comment;
+    if (hasActiveProtectedConstruct(protectedConstructs)) {
+      const protectedState = scanProtectedConstructs(
+        comparisonBody,
+        protectedConstructs,
+        protectedSyntaxBudget,
+      );
+      if (protectedState.safetyBlockedReason) {
+        return unchangedMarkdownResult(
+          input,
+          disabledRules,
+          null,
+          protectedState.safetyBlockedReason,
+        );
+      }
+      protectedConstructs = protectedState;
       processedTokens.push({ ...token, protected: true });
       continue;
     }
 
-    if (rawTag || inTemplater) {
-      const protectedState = scanInlineProtectedConstructs(
-        comparisonBody,
-        rawTag,
-        inTemplater,
-      );
-      rawTag = protectedState.rawTag;
-      inTemplater = protectedState.inTemplater;
-      tokenWasProtected = true;
-      processedTokens.push({ ...token, protected: tokenWasProtected });
+    const lintRangeDirective = readLintRangeDirective(comparisonBody);
+    if (lintRangeDisabled && lintRangeDirective === "enable") {
+      lintRangeDisabled = false;
+      processedTokens.push({ ...token, protected: true });
+      continue;
+    }
+    if (!lintRangeDisabled && lintRangeDirective === "disable") {
+      lintRangeDisabled = true;
+      processedTokens.push({ ...token, protected: true });
       continue;
     }
 
@@ -440,8 +677,28 @@ export function cleanMarkdown(
       continue;
     }
 
-    if (isMathBlockDelimiter(comparisonBody)) {
-      inMathBlock = true;
+    const openedMathBlock = readMathBlockOpen(comparisonBody);
+    if (openedMathBlock !== null) {
+      mathBlock = openedMathBlock;
+      processedTokens.push({ ...token, protected: true });
+      continue;
+    }
+
+    if (lintRangeDisabled) {
+      const protectedState = scanProtectedConstructs(
+        comparisonBody,
+        protectedConstructs,
+        protectedSyntaxBudget,
+      );
+      if (protectedState.safetyBlockedReason) {
+        return unchangedMarkdownResult(
+          input,
+          disabledRules,
+          null,
+          protectedState.safetyBlockedReason,
+        );
+      }
+      protectedConstructs = protectedState;
       processedTokens.push({ ...token, protected: true });
       continue;
     }
@@ -469,25 +726,25 @@ export function cleanMarkdown(
       if (nextLevel !== heading.level) changes.headingLevelsAdjusted += 1;
       if (nextText !== heading.text) changes.headingsCapitalized += 1;
       if (nextLevel !== heading.level || nextText !== heading.text) {
-        token.body = `${heading.indent}${"#".repeat(nextLevel)}${heading.separator}${nextText}${heading.closing}`;
+        token.body = `${heading.bom}${heading.indent}${"#".repeat(nextLevel)}${heading.separator}${nextText}${heading.closing}`;
       }
     }
 
-    const commentState = scanCommentConstructs(comparisonBody, null);
-    if (commentState.protected) {
-      comment = commentState.comment;
-      processedTokens.push({ ...token, protected: true, headingIndex });
-      continue;
-    }
-
-    const protectedState = scanInlineProtectedConstructs(
+    const protectedState = scanProtectedConstructs(
       comparisonBody,
-      null,
-      false,
+      protectedConstructs,
+      protectedSyntaxBudget,
     );
+    if (protectedState.safetyBlockedReason) {
+      return unchangedMarkdownResult(
+        input,
+        disabledRules,
+        null,
+        protectedState.safetyBlockedReason,
+      );
+    }
+    protectedConstructs = protectedState;
     if (protectedState.protected) {
-      rawTag = protectedState.rawTag;
-      inTemplater = protectedState.inTemplater;
       processedTokens.push({ ...token, protected: true, headingIndex });
       continue;
     }
@@ -526,7 +783,7 @@ export function cleanMarkdown(
       if (!heading || targetLevel === undefined || targetLevel === heading.level) {
         continue;
       }
-      token.body = `${heading.indent}${"#".repeat(targetLevel)}${heading.separator}${heading.text}${heading.closing}`;
+      token.body = `${heading.bom}${heading.indent}${"#".repeat(targetLevel)}${heading.separator}${heading.text}${heading.closing}`;
       changes.headingLevelsAdjusted += 1;
     }
   }
@@ -534,7 +791,7 @@ export function cleanMarkdown(
   const retainedTokens: ProcessedLineToken[] = [];
   let previousWasCollapsibleBlank = false;
   for (const token of processedTokens) {
-    const blank = token.body.trim().length === 0;
+    const blank = /^[ \t]*$/.test(token.body);
     const collapsibleBlank = blank && !token.protected;
     if (
       options.collapseConsecutiveBlankLines &&
@@ -547,6 +804,17 @@ export function cleanMarkdown(
 
     retainedTokens.push(token);
     previousWasCollapsibleBlank = collapsibleBlank;
+  }
+
+  if (options.removeTrailingBlankLines) {
+    while (
+      retainedTokens.length > 0 &&
+      !retainedTokens.at(-1)?.protected &&
+      /^[ \t]*$/.test(retainedTokens.at(-1)?.body ?? "")
+    ) {
+      retainedTokens.pop();
+      changes.trailingBlankLinesRemoved += 1;
+    }
   }
 
   if (
@@ -569,7 +837,146 @@ export function cleanMarkdown(
     output,
     changed: output !== input,
     changes,
+    disabledRules,
+    noteDisabledReason: null,
+    safetyBlockedReason: null,
   };
+}
+
+function applyDisabledRules(
+  options: MarkdownCleanupOptions,
+  disabledRules: ReadonlySet<TPSLinterRuleId>,
+): MarkdownCleanupOptions {
+  return {
+    ...options,
+    cleanWhitespaceOnlyLines:
+      options.cleanWhitespaceOnlyLines &&
+      !disabledRules.has("whitespace-only-lines"),
+    collapseConsecutiveBlankLines:
+      options.collapseConsecutiveBlankLines &&
+      !disabledRules.has("blank-lines"),
+    trimNonblankTrailingWhitespace:
+      options.trimNonblankTrailingWhitespace &&
+      !disabledRules.has("trailing-whitespace"),
+    removeTrailingBlankLines:
+      options.removeTrailingBlankLines &&
+      !disabledRules.has("trailing-blank-lines"),
+    ensureFinalNewline:
+      options.ensureFinalNewline && !disabledRules.has("final-newline"),
+    headingCapitalizationStyle: disabledRules.has("heading-capitalization")
+      ? "off"
+      : options.headingCapitalizationStyle,
+    normalizeHeadingLevels:
+      options.normalizeHeadingLevels && !disabledRules.has("heading-levels"),
+    sortFrontmatterFields:
+      options.sortFrontmatterFields &&
+      !disabledRules.has("frontmatter-sort"),
+  };
+}
+
+function sameRuleSet(
+  left: ReadonlySet<TPSLinterRuleId>,
+  right: ReadonlySet<TPSLinterRuleId>,
+): boolean {
+  return (
+    left.size === right.size &&
+    [...left].every((rule) => right.has(rule))
+  );
+}
+
+function unchangedMarkdownResult(
+  input: string,
+  disabledRules: TPSLinterRuleId[],
+  noteDisabledReason: string | null,
+  safetyBlockedReason: string | null,
+): MarkdownCleanupResult {
+  return {
+    output: input,
+    changed: false,
+    changes: {
+      whitespaceOnlyLinesCleaned: 0,
+      extraBlankLinesRemoved: 0,
+      nonblankTrailingWhitespaceLinesCleaned: 0,
+      trailingBlankLinesRemoved: 0,
+      headingsCapitalized: 0,
+      headingLevelsAdjusted: 0,
+      frontmatterFieldsReordered: 0,
+      frontmatterSortSkippedReason: null,
+      finalNewlineAdded: false,
+    },
+    disabledRules,
+    noteDisabledReason,
+    safetyBlockedReason,
+  };
+}
+
+export function inspectMarkdownInputSafety(input: string): string | null {
+  if (input.length > MARKDOWN_SAFETY_LIMITS.maxCharacters) {
+    return `the note exceeds the ${MARKDOWN_SAFETY_LIMITS.maxCharacters.toLocaleString("en-US")}-character safety limit`;
+  }
+
+  let lineCharacters = 0;
+  let lineStart = 0;
+  let lineCount = input.length > 0 ? 1 : 0;
+  for (let index = 0; index < input.length; index += 1) {
+    const character = input[index];
+    if (character === "\r" || character === "\n") {
+      if (
+        exceedsMarkdownContainerDepth(input.slice(lineStart, index))
+      ) {
+        return `a line exceeds the ${MARKDOWN_SAFETY_LIMITS.maxContainerDepth}-container nesting safety limit`;
+      }
+      lineCharacters = 0;
+      lineStart = index + 1;
+      if (!(character === "\n" && input[index - 1] === "\r")) {
+        lineCount += 1;
+        if (lineCount > MARKDOWN_SAFETY_LIMITS.maxLines) {
+          return `the note exceeds the ${MARKDOWN_SAFETY_LIMITS.maxLines.toLocaleString("en-US")}-line safety limit`;
+        }
+      }
+      continue;
+    }
+    lineCharacters += 1;
+    if (lineCharacters > MARKDOWN_SAFETY_LIMITS.maxLineCharacters) {
+      return `a line exceeds the ${MARKDOWN_SAFETY_LIMITS.maxLineCharacters.toLocaleString("en-US")}-character safety limit`;
+    }
+  }
+  if (exceedsMarkdownContainerDepth(input.slice(lineStart))) {
+    return `a line exceeds the ${MARKDOWN_SAFETY_LIMITS.maxContainerDepth}-container nesting safety limit`;
+  }
+  return null;
+}
+
+function exceedsMarkdownContainerDepth(line: string): boolean {
+  let remainder = line.replace(/^\uFEFF/, "");
+  let column = 0;
+  for (
+    let depth = 0;
+    depth <= MARKDOWN_SAFETY_LIMITS.maxContainerDepth;
+    depth += 1
+  ) {
+    const blockquote = stripOneBlockquotePrefix(remainder, column);
+    if (blockquote !== null) {
+      if (depth === MARKDOWN_SAFETY_LIMITS.maxContainerDepth) {
+        return true;
+      }
+      remainder = blockquote.content;
+      column = blockquote.column;
+      continue;
+    }
+
+    const list = stripDirectListMarker(remainder, column);
+    if (list) {
+      if (depth === MARKDOWN_SAFETY_LIMITS.maxContainerDepth) {
+        return true;
+      }
+      remainder = list.content;
+      column = list.column;
+      continue;
+    }
+    return false;
+  }
+  return false;
 }
 
 interface DocumentFrontmatterSortResult {
@@ -639,6 +1046,7 @@ function sortDocumentFrontmatter(
 }
 
 interface AtxHeading {
+  bom: string;
   indent: string;
   level: number;
   separator: string;
@@ -647,7 +1055,8 @@ interface AtxHeading {
 }
 
 function readAtxHeading(line: string): AtxHeading | null {
-  const match = line.match(
+  const bom = line.startsWith("\uFEFF") ? "\uFEFF" : "";
+  const match = line.slice(bom.length).match(
     /^( {0,3})(#{1,6})([ \t]+)(.*?)([ \t]+#{1,}[ \t]*)?$/,
   );
   if (!match?.[1] && match?.[1] !== "") return null;
@@ -656,6 +1065,7 @@ function readAtxHeading(line: string): AtxHeading | null {
   const text = match[4];
   if (!marker || !separator || text === undefined) return null;
   return {
+    bom,
     indent: match[1],
     level: marker.length,
     separator,
@@ -764,7 +1174,7 @@ function capitalizeFirstLetter(text: string): string {
   const match = /\p{L}/u.exec(text);
   if (!match || match.index < 0) return text;
   const letter = match[0];
-  const uppercase = letter.toLocaleUpperCase();
+  const uppercase = letter.toUpperCase();
   if (uppercase === letter) return text;
   return `${text.slice(0, match.index)}${uppercase}${text.slice(match.index + letter.length)}`;
 }
@@ -774,7 +1184,7 @@ function titleCaseWord(
   index: number,
   wordCount: number,
 ): string {
-  const lowercase = word.toLocaleLowerCase();
+  const lowercase = word.toLowerCase();
   if (word !== lowercase) return word;
   if (
     index > 0 &&
@@ -786,7 +1196,7 @@ function titleCaseWord(
   return word.replace(
     /(^|[-–—])(\p{Ll})/gu,
     (_match, prefix: string, letter: string) =>
-      `${prefix}${letter.toLocaleUpperCase()}`,
+      `${prefix}${letter.toUpperCase()}`,
   );
 }
 
@@ -818,10 +1228,13 @@ function replacementForStyle(style: FilenameUnsafeCharacterStyle): string {
 
 function normalizeVaultPath(value: string): string {
   return value
-    .replace(/\\/g, "/")
     .replace(/^\/+/, "")
     .replace(/\/+/g, "/")
     .replace(/\/$/, "");
+}
+
+function collisionPathKey(value: string): string {
+  return normalizeVaultPath(value).normalize("NFC").toLowerCase();
 }
 
 function unique(values: readonly string[]): string[] {
@@ -874,97 +1287,396 @@ function splitLinesPreservingEndings(input: string): LineToken[] {
   return tokens;
 }
 
+function readLintRangeDirective(
+  line: string,
+): "disable" | "enable" | null {
+  const match = line.match(
+    /^ {0,3}(?:<!--\s*tps-linter-(disable|enable)\s*-->|%%\s*tps-linter-(disable|enable)\s*%%)[ \t]*$/,
+  );
+  const directive = match?.[1] ?? match?.[2];
+  return directive === "disable" || directive === "enable"
+    ? directive
+    : null;
+}
+
 function readFenceOpen(line: string): FenceState | null {
-  const match = line.match(/^ {0,3}(`{3,}|~{3,})/);
-  const run = match?.[1];
-  if (!run) return null;
-  return {
-    marker: run[0] as FenceState["marker"],
-    length: run.length,
-  };
+  for (const candidate of markdownContainerCandidates(line, true)) {
+    const content = expandLeadingMarkdownIndent(
+      candidate.content,
+      candidate.column,
+    );
+    const match = content.match(/^ {0,3}(`{3,}|~{3,})/);
+    const run = match?.[1];
+    if (!run) continue;
+    return {
+      marker: run[0] as FenceState["marker"],
+      length: run.length,
+      containerPath: candidate.containerPath,
+    };
+  }
+  return null;
 }
 
 function isIndentedCodeLine(line: string): boolean {
-  return /^(?: {4,}| {0,3}\t)/.test(line) && line.trim().length > 0;
+  if (line.trim().length === 0) return false;
+  for (const candidate of markdownContainerCandidates(line, true)) {
+    if (
+      leadingMarkdownIndentColumns(
+        candidate.content,
+        candidate.column,
+      ) >= 4 ||
+      hasIndentedCodeAfterListMarker(
+        candidate.content,
+        candidate.column,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isBlankMarkdownContainerLine(line: string): boolean {
+  return markdownContainerCandidates(line, true).some(
+    (candidate) => candidate.content.trim().length === 0,
+  );
+}
+
+function leadingMarkdownIndentColumns(
+  line: string,
+  startColumn: number,
+): number {
+  let cursor = 0;
+  let column = startColumn;
+  while (cursor < line.length) {
+    const character = line[cursor];
+    if (character !== " " && character !== "\t") break;
+    column = advanceMarkdownColumn(column, character);
+    cursor += 1;
+  }
+  return column - startColumn;
+}
+
+function hasIndentedCodeAfterListMarker(
+  line: string,
+  startColumn: number,
+): boolean {
+  let cursor = 0;
+  let column = startColumn;
+  while (cursor < line.length) {
+    const character = line[cursor];
+    if (character !== " " && character !== "\t") break;
+    const nextColumn = advanceMarkdownColumn(column, character);
+    if (nextColumn - startColumn > 3) return false;
+    column = nextColumn;
+    cursor += 1;
+  }
+
+  const marker = /^(?:[-+*]|\d{1,9}[.)])/.exec(
+    line.slice(cursor),
+  )?.[0];
+  if (!marker) return false;
+  cursor += marker.length;
+  const markerColumn = column + marker.length;
+  let contentColumn = markerColumn;
+  while (cursor < line.length) {
+    const character = line[cursor];
+    if (character !== " " && character !== "\t") break;
+    contentColumn = advanceMarkdownColumn(contentColumn, character);
+    cursor += 1;
+  }
+
+  return (
+    cursor < line.length &&
+    contentColumn - markerColumn > 4
+  );
 }
 
 function isFenceClose(line: string, fence: FenceState): boolean {
   const marker = fence.marker === "`" ? "`" : "~";
-  return new RegExp(`^ {0,3}${marker}{${fence.length},}[ \\t]*$`).test(line);
+  const content = stripContainerContinuation(
+    line,
+    fence.containerPath,
+  );
+  return (
+    content !== null &&
+    new RegExp(`^ {0,3}${marker}{${fence.length},}[ \\t]*$`).test(content)
+  );
 }
 
-function isMathBlockDelimiter(line: string): boolean {
-  return /^ {0,3}\$\$[ \t]*$/.test(line);
+function readMathBlockOpen(line: string): MathBlockState | null {
+  for (const candidate of markdownContainerCandidates(line, true)) {
+    const content = expandLeadingMarkdownIndent(
+      candidate.content,
+      candidate.column,
+    );
+    if (/^ {0,3}\$\$[ \t]*$/.test(content)) {
+      return {
+        containerPath: candidate.containerPath,
+      };
+    }
+  }
+  return null;
 }
 
-function scanInlineProtectedConstructs(
+function isMathBlockClose(line: string, state: MathBlockState): boolean {
+  const content = stripContainerContinuation(
+    line,
+    state.containerPath,
+  );
+  return content !== null && /^ {0,3}\$\$[ \t]*$/.test(content);
+}
+
+function markdownContainerCandidates(
   line: string,
-  initialRawTag: RawProtectedTag | null,
-  initialInTemplater: boolean,
-): InlineProtectedState {
-  let rawTag = initialRawTag;
-  let inTemplater = initialInTemplater;
-  let cursor = 0;
-  let protectedLine = rawTag !== null || inTemplater;
+  includeDirectListMarker: boolean,
+): DelimiterCandidate[] {
+  const candidates: DelimiterCandidate[] = [
+    { content: line, containerPath: [], column: 0 },
+  ];
+  const seen = new Set<string>();
+  const output: DelimiterCandidate[] = [];
 
-  while (cursor < line.length) {
-    if (rawTag) {
-      const close = findRawTagClose(line, rawTag, cursor);
-      if (!close) {
-        return { rawTag, inTemplater: false, protected: true };
-      }
-      cursor = close.end;
-      rawTag = null;
-      continue;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    if (!candidate) continue;
+    const key =
+      `${serializeContainerPath(candidate.containerPath)}\u0000` +
+      `${candidate.column}\u0000${candidate.content}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(candidate);
+
+    const blockquote = stripOneBlockquotePrefix(
+      candidate.content,
+      candidate.column,
+    );
+    if (blockquote !== null) {
+      candidates.push({
+        content: blockquote.content,
+        containerPath: [
+          ...candidate.containerPath,
+          { kind: "blockquote" },
+        ],
+        column: blockquote.column,
+      });
     }
 
-    if (inTemplater) {
-      const closeIndex = line.indexOf("%>", cursor);
-      if (closeIndex < 0) {
-        return { rawTag: null, inTemplater: true, protected: true };
+    if (includeDirectListMarker) {
+      const list = stripDirectListMarker(
+        candidate.content,
+        candidate.column,
+      );
+      if (list) {
+        candidates.push({
+          content: list.content,
+          containerPath: [
+            ...candidate.containerPath,
+            { kind: "list", indent: list.indent },
+          ],
+          column: list.column,
+        });
       }
-      cursor = closeIndex + 2;
-      inTemplater = false;
-      continue;
-    }
-
-    const rawOpen = findRawTagOpen(line, cursor);
-    const templaterOpenIndex = line.indexOf("<%", cursor);
-    if (!rawOpen && templaterOpenIndex < 0) break;
-
-    protectedLine = true;
-    if (
-      templaterOpenIndex >= 0 &&
-      (!rawOpen || templaterOpenIndex < rawOpen.index)
-    ) {
-      inTemplater = true;
-      cursor = templaterOpenIndex + 2;
-    } else if (rawOpen) {
-      rawTag = rawOpen.tag;
-      cursor = rawOpen.end;
     }
   }
 
+  return output;
+}
+
+function serializeContainerPath(path: readonly ContainerStep[]): string {
+  return path
+    .map((step) =>
+      step.kind === "blockquote" ? "blockquote" : `list:${step.indent}`,
+    )
+    .join("/");
+}
+
+function stripOneBlockquotePrefix(
+  line: string,
+  startColumn = 0,
+): { content: string; column: number } | null {
+  let cursor = 0;
+  let column = startColumn;
+  while (cursor < line.length) {
+    const character = line[cursor];
+    if (character !== " " && character !== "\t") break;
+    const nextColumn = advanceMarkdownColumn(column, character);
+    if (nextColumn - startColumn > 3) return null;
+    column = nextColumn;
+    cursor += 1;
+  }
+  if (line[cursor] !== ">") return null;
+  column += 1;
+  cursor += 1;
+  let residualSpaces = "";
+  if (line[cursor] === " ") {
+    column += 1;
+    cursor += 1;
+  } else if (line[cursor] === "\t") {
+    const tabEndColumn = advanceMarkdownColumn(column, "\t");
+    column += 1;
+    residualSpaces = " ".repeat(tabEndColumn - column);
+    cursor += 1;
+  }
   return {
-    rawTag,
-    inTemplater,
-    protected: protectedLine,
+    content: `${residualSpaces}${line.slice(cursor)}`,
+    column,
   };
 }
 
-function scanCommentConstructs(
+function stripDirectListMarker(
   line: string,
-  initialComment: MarkdownComment | null,
-): CommentProtectedState {
-  let comment = initialComment;
+  startColumn = 0,
+): { content: string; indent: number; column: number } | null {
   let cursor = 0;
-  let protectedLine = comment !== null;
+  let column = startColumn;
+  while (cursor < line.length) {
+    const character = line[cursor];
+    if (character !== " " && character !== "\t") break;
+    const nextColumn = advanceMarkdownColumn(column, character);
+    if (nextColumn - startColumn > 3) return null;
+    column = nextColumn;
+    cursor += 1;
+  }
+  const marker = /^(?:[-+*]|\d{1,9}[.)])/.exec(
+    line.slice(cursor),
+  )?.[0];
+  if (!marker) return null;
+
+  cursor += marker.length;
+  const markerColumn = column + marker.length;
+  let contentColumn = markerColumn;
+  while (cursor < line.length) {
+    const character = line[cursor];
+    if (character !== " " && character !== "\t") break;
+    contentColumn = advanceMarkdownColumn(contentColumn, character);
+    cursor += 1;
+    if (contentColumn - markerColumn > 4) return null;
+  }
+  const paddingColumns = contentColumn - markerColumn;
+  if (paddingColumns < 1 || paddingColumns > 4) return null;
+
+  return {
+    content: line.slice(cursor),
+    indent: contentColumn - startColumn,
+    column: contentColumn,
+  };
+}
+
+function advanceMarkdownColumn(column: number, character: string): number {
+  return character === "\t"
+    ? column + (4 - (column % 4))
+    : column + 1;
+}
+
+function expandLeadingMarkdownIndent(
+  line: string,
+  startColumn: number,
+): string {
+  let cursor = 0;
+  let column = startColumn;
+  let spaces = "";
+  while (cursor < line.length) {
+    const character = line[cursor];
+    if (character !== " " && character !== "\t") break;
+    const nextColumn = advanceMarkdownColumn(column, character);
+    spaces += " ".repeat(nextColumn - column);
+    column = nextColumn;
+    cursor += 1;
+  }
+  return `${spaces}${line.slice(cursor)}`;
+}
+
+function stripRequiredIndent(
+  line: string,
+  indent: number,
+  startColumn: number,
+): { content: string; column: number } | null {
+  if (indent === 0) return { content: line, column: startColumn };
+  let cursor = 0;
+  let column = startColumn;
+  const targetColumn = startColumn + indent;
+  while (cursor < line.length && column < targetColumn) {
+    const character = line[cursor];
+    if (character !== " " && character !== "\t") return null;
+    column = advanceMarkdownColumn(column, character);
+    cursor += 1;
+  }
+  if (column < targetColumn) return null;
+  return {
+    content:
+      `${" ".repeat(column - targetColumn)}${line.slice(cursor)}`,
+    column: targetColumn,
+  };
+}
+
+function stripContainerContinuation(
+  line: string,
+  path: readonly ContainerStep[],
+): string | null {
+  let remainder = line;
+  let column = 0;
+  for (const step of path) {
+    if (step.kind === "blockquote") {
+      const next = stripOneBlockquotePrefix(remainder, column);
+      if (next === null) return null;
+      remainder = next.content;
+      column = next.column;
+      continue;
+    }
+
+    const next = stripRequiredIndent(remainder, step.indent, column);
+    if (next === null) return null;
+    remainder = next.content;
+    column = next.column;
+  }
+  return expandLeadingMarkdownIndent(remainder, column);
+}
+
+function hasActiveProtectedConstruct(
+  state: ProtectedConstructState,
+): boolean {
+  return (
+    state.comment !== null ||
+    state.inTemplater ||
+    state.htmlDelimited !== null ||
+    state.codeSpanTicks !== null ||
+    state.rawHtmlTag !== null ||
+    state.htmlTags.length > 0
+  );
+}
+
+function scanProtectedConstructs(
+  line: string,
+  initialState: ProtectedConstructState,
+  documentBudget: ProtectedSyntaxBudget,
+): ProtectedConstructScan {
+  let comment = initialState.comment;
+  let inTemplater = initialState.inTemplater;
+  let htmlDelimited = initialState.htmlDelimited;
+  let codeSpanTicks = initialState.codeSpanTicks;
+  let rawHtmlTag = initialState.rawHtmlTag;
+  const htmlTags = [...initialState.htmlTags];
+  let referenceTitleMayContinue =
+    initialState.referenceTitleMayContinue;
+  let cursor = 0;
+  let protectedTokenCount = 0;
+  let protectedLine = hasActiveProtectedConstruct(initialState);
 
   while (cursor < line.length) {
     if (comment === "obsidian") {
       const closeIndex = line.indexOf("%%", cursor);
       if (closeIndex < 0) {
-        return { comment, protected: true };
+        return {
+          comment,
+          inTemplater,
+          htmlDelimited,
+          codeSpanTicks,
+          rawHtmlTag,
+          htmlTags,
+          referenceTitleMayContinue,
+          protected: true,
+        };
       }
       cursor = closeIndex + 2;
       comment = null;
@@ -974,55 +1686,968 @@ function scanCommentConstructs(
     if (comment === "html") {
       const closeIndex = line.indexOf("-->", cursor);
       if (closeIndex < 0) {
-        return { comment, protected: true };
+        return {
+          comment,
+          inTemplater,
+          htmlDelimited,
+          codeSpanTicks,
+          rawHtmlTag,
+          htmlTags,
+          referenceTitleMayContinue,
+          protected: true,
+        };
       }
       cursor = closeIndex + 3;
       comment = null;
       continue;
     }
 
-    const obsidianOpen = line.indexOf("%%", cursor);
-    const htmlOpen = line.indexOf("<!--", cursor);
-    if (obsidianOpen < 0 && htmlOpen < 0) break;
+    if (inTemplater) {
+      const closeIndex = line.indexOf("%>", cursor);
+      if (closeIndex < 0) {
+        return {
+          comment,
+          inTemplater: true,
+          htmlDelimited,
+          codeSpanTicks,
+          rawHtmlTag,
+          htmlTags,
+          referenceTitleMayContinue,
+          protected: true,
+        };
+      }
+      cursor = closeIndex + 2;
+      inTemplater = false;
+      continue;
+    }
 
-    protectedLine = true;
-    if (obsidianOpen >= 0 && (htmlOpen < 0 || obsidianOpen < htmlOpen)) {
+    if (htmlDelimited) {
+      const closeIndex = line.indexOf(
+        htmlDelimitedClose(htmlDelimited),
+        cursor,
+      );
+      if (closeIndex < 0) {
+        return {
+          comment,
+          inTemplater,
+          htmlDelimited,
+          codeSpanTicks,
+          rawHtmlTag,
+          htmlTags,
+          referenceTitleMayContinue,
+          protected: true,
+        };
+      }
+      cursor =
+        closeIndex + htmlDelimitedClose(htmlDelimited).length;
+      htmlDelimited = null;
+      continue;
+    }
+
+    if (rawHtmlTag) {
+      const close = findRawHtmlClose(line, cursor, rawHtmlTag);
+      if (close < 0) {
+        return {
+          comment,
+          inTemplater,
+          htmlDelimited,
+          codeSpanTicks,
+          rawHtmlTag,
+          htmlTags,
+          referenceTitleMayContinue,
+          protected: true,
+        };
+      }
+      cursor = close;
+      rawHtmlTag = null;
+      continue;
+    }
+
+    if (codeSpanTicks !== null) {
+      const closingRun = findMatchingBacktickRun(
+        line,
+        cursor,
+        codeSpanTicks,
+      );
+      if (!closingRun) {
+        return {
+          comment,
+          inTemplater,
+          htmlDelimited,
+          codeSpanTicks,
+          rawHtmlTag,
+          htmlTags,
+          referenceTitleMayContinue,
+          protected: true,
+        };
+      }
+      cursor = closingRun.end;
+      codeSpanTicks = null;
+      continue;
+    }
+
+    const token = findNextProtectedToken(line, cursor);
+    if (!token) break;
+    protectedTokenCount += 1;
+    documentBudget.remaining -= 1;
+    if (
+      protectedTokenCount >
+      MARKDOWN_SAFETY_LIMITS.maxProtectedTokensPerLine
+    ) {
+      return {
+        comment,
+        inTemplater,
+        htmlDelimited,
+        codeSpanTicks,
+        rawHtmlTag,
+        htmlTags,
+        referenceTitleMayContinue,
+        protected: true,
+        safetyBlockedReason:
+          "a line exceeds the protected-syntax work budget",
+      };
+    }
+    if (documentBudget.remaining < 0) {
+      return {
+        comment,
+        inTemplater,
+        htmlDelimited,
+        codeSpanTicks,
+        rawHtmlTag,
+        htmlTags,
+        referenceTitleMayContinue,
+        protected: true,
+        safetyBlockedReason:
+          "the note exceeds the protected-syntax work budget",
+      };
+    }
+
+    if (token.kind === "unsafe") {
+      return {
+        comment,
+        inTemplater,
+        htmlDelimited,
+        codeSpanTicks,
+        rawHtmlTag,
+        htmlTags,
+        referenceTitleMayContinue,
+        protected: true,
+        safetyBlockedReason: token.reason,
+      };
+    }
+
+    if (token.kind !== "inline-opaque" || token.protectLine === true) {
+      protectedLine = true;
+    }
+    cursor = token.end;
+    if (token.kind === "obsidian-comment") {
       comment = "obsidian";
-      cursor = obsidianOpen + 2;
-    } else {
+    } else if (token.kind === "html-comment") {
       comment = "html";
-      cursor = htmlOpen + 4;
+    } else if (token.kind === "templater") {
+      inTemplater = true;
+    } else if (token.kind === "html-delimited") {
+      htmlDelimited = token.construct;
+    } else if (token.kind === "code-span") {
+      codeSpanTicks = token.ticks;
+    } else if (token.kind === "inline-opaque") {
+      // The complete inline span was consumed by the token.
+      referenceTitleMayContinue =
+        token.referenceTitleMayContinue === true;
+    } else if (token.kind === "html-tag") {
+      if (!token.complete) {
+        return {
+          comment,
+          inTemplater,
+          htmlDelimited,
+          codeSpanTicks,
+          rawHtmlTag,
+          htmlTags,
+          referenceTitleMayContinue,
+          protected: true,
+          safetyBlockedReason:
+            "multiline or unclosed HTML tags require manual review",
+        };
+      }
+      if (
+        !token.closing &&
+        !token.selfClosing &&
+        RAW_HTML_TAGS.has(token.name as RawHtmlTag)
+      ) {
+        rawHtmlTag = token.name as RawHtmlTag;
+      } else {
+        updateHtmlTagStack(htmlTags, token);
+      }
     }
   }
 
-  return { comment, protected: protectedLine };
-}
-
-function findRawTagOpen(
-  line: string,
-  fromIndex: number,
-): { tag: RawProtectedTag; index: number; end: number } | null {
-  const match = /<(pre|textarea|script|style)(?=[\s/>])/i.exec(
-    line.slice(fromIndex),
-  );
-  if (!match || match.index < 0 || !match[1]) return null;
-
-  const index = fromIndex + match.index;
   return {
-    tag: match[1].toLocaleLowerCase() as RawProtectedTag,
-    index,
-    end: index + match[0].length,
+    comment,
+    inTemplater,
+    htmlDelimited,
+    codeSpanTicks,
+    rawHtmlTag,
+    htmlTags,
+    referenceTitleMayContinue,
+    protected: protectedLine,
   };
 }
 
-function findRawTagClose(
+function findNextProtectedToken(
   line: string,
-  tag: RawProtectedTag,
+  fromIndex: number,
+): ProtectedToken | null {
+  const tokens: ProtectedToken[] = [];
+  const obsidianIndex = findNextUnescapedLiteral(line, "%%", fromIndex);
+  if (obsidianIndex >= 0) {
+    tokens.push({
+      kind: "obsidian-comment",
+      index: obsidianIndex,
+      end: obsidianIndex + 2,
+    });
+  }
+
+  const htmlCommentIndex = findNextUnescapedLiteral(
+    line,
+    "<!--",
+    fromIndex,
+  );
+  if (htmlCommentIndex >= 0) {
+    tokens.push({
+      kind: "html-comment",
+      index: htmlCommentIndex,
+      end: htmlCommentIndex + 4,
+    });
+  }
+
+  const templaterIndex = findNextUnescapedLiteral(line, "<%", fromIndex);
+  if (templaterIndex >= 0) {
+    tokens.push({
+      kind: "templater",
+      index: templaterIndex,
+      end: templaterIndex + 2,
+    });
+  }
+
+  const processingInstructionIndex = findNextUnescapedLiteral(
+    line,
+    "<?",
+    fromIndex,
+  );
+  if (processingInstructionIndex >= 0) {
+    tokens.push({
+      kind: "html-delimited",
+      index: processingInstructionIndex,
+      end: processingInstructionIndex + 2,
+      construct: "processing-instruction",
+    });
+  }
+
+  const cdataIndex = findNextUnescapedLiteral(
+    line,
+    "<![CDATA[",
+    fromIndex,
+  );
+  if (cdataIndex >= 0) {
+    tokens.push({
+      kind: "html-delimited",
+      index: cdataIndex,
+      end: cdataIndex + "<![CDATA[".length,
+      construct: "cdata",
+    });
+  }
+
+  const declarationPattern = /<![A-Z]/g;
+  declarationPattern.lastIndex = fromIndex;
+  let declaration = declarationPattern.exec(line);
+  while (
+    declaration &&
+    declaration.index >= 0 &&
+    isBackslashEscaped(line, declaration.index)
+  ) {
+    declaration = declarationPattern.exec(line);
+  }
+  if (declaration && declaration.index >= 0) {
+    tokens.push({
+      kind: "html-delimited",
+      index: declaration.index,
+      end: declarationPattern.lastIndex,
+      construct: "declaration",
+    });
+  }
+
+  const inlineOpaque = findNextInlineOpaqueSpan(line, fromIndex);
+  if (inlineOpaque) tokens.push(inlineOpaque);
+
+  const markdownLink = findNextMarkdownLinkToken(line, fromIndex);
+  if (markdownLink) tokens.push(markdownLink);
+
+  const codeSpan = findNextCodeSpan(line, fromIndex);
+  if (codeSpan) tokens.push(codeSpan);
+
+  const htmlTag = findNextHtmlTag(line, fromIndex);
+  if (htmlTag) tokens.push({ kind: "html-tag", ...htmlTag });
+
+  tokens.sort(
+    (left, right) =>
+      left.index - right.index ||
+      protectedTokenPriority(left) - protectedTokenPriority(right),
+  );
+  return tokens[0] ?? null;
+}
+
+function protectedTokenPriority(token: ProtectedToken): number {
+  if (token.kind === "unsafe") return 0;
+  if (token.kind === "inline-opaque") return 0;
+  if (token.kind === "code-span") return 1;
+  return 2;
+}
+
+function findNextInlineOpaqueSpan(
+  line: string,
+  fromIndex: number,
+): Extract<ProtectedToken, { kind: "inline-opaque" }> | null {
+  const candidates = [
+    findNextWikiOrInlineFieldSpan(line, fromIndex),
+    findNextInlineMathSpan(line, fromIndex),
+  ].filter(
+    (
+      candidate,
+    ): candidate is Extract<
+      ProtectedToken,
+      { kind: "inline-opaque" }
+    > => candidate !== null,
+  );
+  candidates.sort(
+    (left, right) =>
+      left.index - right.index || right.end - left.end,
+  );
+  return candidates[0] ?? null;
+}
+
+function findNextWikiOrInlineFieldSpan(
+  line: string,
+  fromIndex: number,
+): Extract<ProtectedToken, { kind: "inline-opaque" }> | null {
+  const wikiStart = findNextUnescapedLiteral(line, "[[", fromIndex);
+  const wikiEnd =
+    wikiStart >= 0
+      ? findNextUnescapedLiteral(line, "]]", wikiStart + 2)
+      : -1;
+
+  const field = findNextInlineFieldSpan(line, fromIndex);
+
+  const candidates: Array<
+    Extract<ProtectedToken, { kind: "inline-opaque" }>
+  > = [];
+  if (wikiStart >= 0 && wikiEnd >= 0) {
+    candidates.push({
+      kind: "inline-opaque",
+      index: wikiStart,
+      end: wikiEnd + 2,
+    });
+  }
+  if (field) candidates.push(field);
+  candidates.sort((left, right) => left.index - right.index);
+  return candidates[0] ?? null;
+}
+
+function findNextInlineFieldSpan(
+  line: string,
+  fromIndex: number,
+): Extract<ProtectedToken, { kind: "inline-opaque" }> | null {
+  let opening = -1;
+  let hasSeparator = false;
+  let escaped = false;
+
+  for (let index = fromIndex; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === "\\") {
+      escaped = !escaped;
+      continue;
+    }
+    const currentEscaped = escaped;
+    escaped = false;
+
+    if (character === "[" && !currentEscaped) {
+      opening = index;
+      hasSeparator = false;
+      continue;
+    }
+    if (
+      opening >= 0 &&
+      character === ":" &&
+      line[index + 1] === ":" &&
+      !currentEscaped
+    ) {
+      hasSeparator = true;
+      index += 1;
+      continue;
+    }
+    if (character !== "]" || currentEscaped || opening < 0) continue;
+    if (hasSeparator) {
+      return {
+        kind: "inline-opaque",
+        index: opening,
+        end: index + 1,
+      };
+    }
+    opening = -1;
+  }
+  return null;
+}
+
+type MarkdownLinkToken = Extract<
+  ProtectedToken,
+  { kind: "inline-opaque" | "unsafe" }
+>;
+
+function findNextMarkdownLinkToken(
+  line: string,
+  fromIndex: number,
+): MarkdownLinkToken | null {
+  if (fromIndex === 0) {
+    const reference = parseReferenceDefinition(line);
+    if (reference.kind === "valid") {
+      if (containsStrongProtectedDelimiter(line.slice(0, reference.end))) {
+        return unsafeMarkdownToken(
+          0,
+          reference.end,
+          "a Markdown reference definition contains ambiguous protected syntax",
+        );
+      }
+      return {
+        kind: "inline-opaque",
+        index: 0,
+        end: reference.end,
+        referenceTitleMayContinue:
+          reference.referenceTitleMayContinue,
+        protectLine: true,
+      };
+    }
+    if (reference.kind === "unsafe") {
+      return unsafeMarkdownToken(0, line.length, reference.reason);
+    }
+  }
+
+  const bracketPattern = /\[/g;
+  bracketPattern.lastIndex = fromIndex;
+  for (
+    let opening = bracketPattern.exec(line);
+    opening;
+    opening = bracketPattern.exec(line)
+  ) {
+    if (isBackslashEscaped(line, opening.index)) continue;
+    const labelEnd = findMatchingMarkdownBracket(line, opening.index);
+    if (labelEnd === null) {
+      return unsafeMarkdownToken(
+        opening.index,
+        line.length,
+        "multiline or unclosed Markdown labels require manual review",
+      );
+    }
+
+    const isImage =
+      opening.index > 0 &&
+      line[opening.index - 1] === "!" &&
+      !isBackslashEscaped(line, opening.index - 1);
+    const tokenStart = isImage ? opening.index - 1 : opening.index;
+    const next = line[labelEnd];
+    let tokenEnd: number | null = null;
+    let referenceStyle = false;
+
+    if (next === "(") {
+      tokenEnd = parseInlineLinkClose(line, labelEnd);
+      if (tokenEnd === null) {
+        const laxEnd = findBalancedLinkClose(line, labelEnd);
+        if (laxEnd === null) {
+          return unsafeMarkdownToken(
+            tokenStart,
+            line.length,
+            "multiline or unclosed Markdown links require manual review",
+          );
+        }
+        if (
+          containsRiskyMarkdownMaskSyntax(
+            line.slice(tokenStart, laxEnd),
+          )
+        ) {
+          return unsafeMarkdownToken(
+            tokenStart,
+            laxEnd,
+            "an invalid Markdown link contains ambiguous protected syntax",
+          );
+        }
+        bracketPattern.lastIndex = labelEnd;
+        continue;
+      }
+    } else if (next === "[") {
+      referenceStyle = true;
+      tokenEnd = findMatchingMarkdownBracket(line, labelEnd);
+      if (tokenEnd === null) {
+        return unsafeMarkdownToken(
+          tokenStart,
+          line.length,
+          "multiline or unclosed Markdown reference links require manual review",
+        );
+      }
+    } else if (
+      containsRiskyMarkdownMaskSyntax(
+        line.slice(tokenStart, labelEnd),
+      )
+    ) {
+      return unsafeMarkdownToken(
+        tokenStart,
+        labelEnd,
+        "a shortcut Markdown reference contains ambiguous protected syntax",
+      );
+    } else {
+      continue;
+    }
+
+    if (
+      (referenceStyle &&
+        containsRiskyMarkdownMaskSyntax(
+          line.slice(tokenStart, tokenEnd),
+        )) ||
+      containsStrongProtectedDelimiter(
+        line.slice(tokenStart, tokenEnd),
+      )
+    ) {
+      return unsafeMarkdownToken(
+        tokenStart,
+        tokenEnd,
+        "a Markdown link contains ambiguous protected syntax",
+      );
+    }
+    return {
+      kind: "inline-opaque",
+      index: tokenStart,
+      end: tokenEnd,
+    };
+  }
+  return null;
+}
+
+type ReferenceDefinitionParse =
+  | { kind: "none" }
+  | {
+      kind: "valid";
+      end: number;
+      referenceTitleMayContinue: boolean;
+    }
+  | { kind: "unsafe"; reason: string };
+
+function parseReferenceDefinition(line: string): ReferenceDefinitionParse {
+  const indent = /^ {0,3}/.exec(line)?.[0].length ?? 0;
+  if (line[indent] !== "[" || isBackslashEscaped(line, indent)) {
+    return { kind: "none" };
+  }
+  const labelEnd = findMatchingMarkdownBracket(line, indent);
+  if (labelEnd === null || line[labelEnd] !== ":") {
+    return { kind: "none" };
+  }
+
+  let cursor = skipMarkdownSpaces(line, labelEnd + 1);
+  if (cursor >= line.length) {
+    return {
+      kind: "unsafe",
+      reason:
+        "multiline Markdown reference definitions require manual review",
+    };
+  }
+
+  const destination = parseLinkDestination(line, cursor, null);
+  if (!destination) {
+    return invalidReferenceDefinition(line);
+  }
+  cursor = destination.end;
+  const beforeTitle = cursor;
+  let titlePresent = false;
+  cursor = skipMarkdownSpaces(line, cursor);
+  if (cursor < line.length) {
+    const title = parseLinkTitle(line, cursor);
+    if (!title) {
+      if (
+        line[cursor] === '"' ||
+        line[cursor] === "'" ||
+        line[cursor] === "("
+      ) {
+        return {
+          kind: "unsafe",
+          reason:
+            "multiline or unclosed Markdown reference titles require manual review",
+        };
+      }
+      return invalidReferenceDefinition(line);
+    }
+    titlePresent = true;
+    cursor = skipMarkdownSpaces(line, title.end);
+  } else if (cursor === beforeTitle) {
+    return {
+      kind: "valid",
+      end: cursor,
+      referenceTitleMayContinue: true,
+    };
+  }
+
+  if (cursor !== line.length) return invalidReferenceDefinition(line);
+  return {
+    kind: "valid",
+    end: cursor,
+    referenceTitleMayContinue: !titlePresent,
+  };
+}
+
+function invalidReferenceDefinition(
+  line: string,
+): ReferenceDefinitionParse {
+  if (containsRiskyMarkdownMaskSyntax(line)) {
+    return {
+      kind: "unsafe",
+      reason:
+        "an invalid Markdown reference definition contains ambiguous protected syntax",
+    };
+  }
+  return { kind: "none" };
+}
+
+function parseInlineLinkClose(
+  line: string,
+  openParenthesis: number,
+): number | null {
+  let cursor = skipMarkdownSpaces(line, openParenthesis + 1);
+  if (line[cursor] === ")") return cursor + 1;
+
+  const destination = parseLinkDestination(line, cursor, ")");
+  if (!destination) return null;
+  cursor = destination.end;
+  if (line[cursor] === ")") return cursor + 1;
+
+  const afterDestination = skipMarkdownSpaces(line, cursor);
+  if (afterDestination === cursor) return null;
+  cursor = afterDestination;
+  if (line[cursor] === ")") return cursor + 1;
+
+  const title = parseLinkTitle(line, cursor);
+  if (!title) return null;
+  cursor = skipMarkdownSpaces(line, title.end);
+  return line[cursor] === ")" ? cursor + 1 : null;
+}
+
+function parseLinkDestination(
+  line: string,
+  fromIndex: number,
+  outerClose: ")" | null,
+): { end: number } | null {
+  if (line[fromIndex] === "<") {
+    for (let index = fromIndex + 1; index < line.length; index += 1) {
+      const character = line[index];
+      if (character === "\\") {
+        index += 1;
+        continue;
+      }
+      if (character === "<") return null;
+      if (character === ">") return { end: index + 1 };
+    }
+    return null;
+  }
+
+  let cursor = fromIndex;
+  let depth = 0;
+  while (cursor < line.length) {
+    const character = line[cursor];
+    if (character === "\\") {
+      cursor = Math.min(line.length, cursor + 2);
+      continue;
+    }
+    if (character === " " || character === "\t") break;
+    if (character === "(") {
+      depth += 1;
+    } else if (character === ")") {
+      if (depth === 0 && outerClose === ")") break;
+      if (depth === 0) return null;
+      depth -= 1;
+    }
+    cursor += 1;
+  }
+  if (depth !== 0 || cursor === fromIndex) return null;
+  return { end: cursor };
+}
+
+function parseLinkTitle(
+  line: string,
   fromIndex: number,
 ): { end: number } | null {
-  const match = new RegExp(`</${tag}\\s*>`, "i").exec(line.slice(fromIndex));
+  const opening = line[fromIndex];
+  const closing =
+    opening === "(" ? ")" : opening === "'" || opening === '"' ? opening : null;
+  if (!closing) return null;
+
+  for (let index = fromIndex + 1; index < line.length; index += 1) {
+    if (line[index] === "\\") {
+      index += 1;
+      continue;
+    }
+    if (line[index] === closing) return { end: index + 1 };
+  }
+  return null;
+}
+
+function findMatchingMarkdownBracket(
+  line: string,
+  openingIndex: number,
+): number | null {
+  let depth = 1;
+  for (let index = openingIndex + 1; index < line.length; index += 1) {
+    if (line[index] === "\\") {
+      index += 1;
+      continue;
+    }
+    if (line[index] === "[") {
+      depth += 1;
+    } else if (line[index] === "]") {
+      depth -= 1;
+      if (depth === 0) return index + 1;
+    }
+  }
+  return null;
+}
+
+function findBalancedLinkClose(
+  line: string,
+  openParenthesis: number,
+): number | null {
+  let depth = 1;
+  let quote: "'" | '"' | null = null;
+  let inAngleDestination = false;
+
+  for (let index = openParenthesis + 1; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === "\\") {
+      index += 1;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (inAngleDestination) {
+      if (character === ">") inAngleDestination = false;
+      continue;
+    }
+    if (character === "<") {
+      inAngleDestination = true;
+    } else if (character === "(") {
+      depth += 1;
+    } else if (character === ")") {
+      depth -= 1;
+      if (depth === 0) return index + 1;
+    }
+  }
+  return null;
+}
+
+function skipMarkdownSpaces(line: string, fromIndex: number): number {
+  let cursor = fromIndex;
+  while (line[cursor] === " " || line[cursor] === "\t") cursor += 1;
+  return cursor;
+}
+
+function containsStrongProtectedDelimiter(value: string): boolean {
+  return /%%|<!--|<%|<\?|<!\[CDATA\[|<![A-Z]/.test(value);
+}
+
+function containsRiskyMarkdownMaskSyntax(value: string): boolean {
+  return /[`%<]/.test(value);
+}
+
+function unsafeMarkdownToken(
+  index: number,
+  end: number,
+  reason: string,
+): Extract<ProtectedToken, { kind: "unsafe" }> {
+  return { kind: "unsafe", index, end, reason };
+}
+
+function findNextInlineMathSpan(
+  line: string,
+  fromIndex: number,
+): Extract<ProtectedToken, { kind: "inline-opaque" }> | null {
+  const pattern = /\$+/g;
+  pattern.lastIndex = fromIndex;
+  let opening = pattern.exec(line);
+  while (opening) {
+    if (
+      !isBackslashEscaped(line, opening.index) &&
+      (opening[0].length === 1 || opening[0].length === 2)
+    ) {
+      const closing = findMatchingUnescapedDollarRun(
+        line,
+        pattern.lastIndex,
+        opening[0].length,
+      );
+      if (closing !== null) {
+        return {
+          kind: "inline-opaque",
+          index: opening.index,
+          end: closing,
+        };
+      }
+    }
+    opening = pattern.exec(line);
+  }
+  return null;
+}
+
+function findMatchingUnescapedDollarRun(
+  line: string,
+  fromIndex: number,
+  length: number,
+): number | null {
+  const pattern = /\$+/g;
+  pattern.lastIndex = fromIndex;
+  for (let match = pattern.exec(line); match; match = pattern.exec(line)) {
+    if (
+      match[0].length === length &&
+      !isBackslashEscaped(line, match.index)
+    ) {
+      return pattern.lastIndex;
+    }
+  }
+  return null;
+}
+
+function findNextCodeSpan(
+  line: string,
+  fromIndex: number,
+): Extract<ProtectedToken, { kind: "code-span" }> | null {
+  const pattern = /`+/g;
+  pattern.lastIndex = fromIndex;
+  let match = pattern.exec(line);
+  while (match && isBackslashEscaped(line, match.index)) {
+    match = pattern.exec(line);
+  }
   if (!match || match.index < 0) return null;
-  return { end: fromIndex + match.index + match[0].length };
+  return {
+    kind: "code-span",
+    index: match.index,
+    end: pattern.lastIndex,
+    ticks: match[0].length,
+  };
+}
+
+function findMatchingBacktickRun(
+  line: string,
+  fromIndex: number,
+  ticks: number,
+): { end: number } | null {
+  const pattern = /`+/g;
+  pattern.lastIndex = fromIndex;
+  for (let match = pattern.exec(line); match; match = pattern.exec(line)) {
+    if (match[0].length === ticks) return { end: pattern.lastIndex };
+  }
+  return null;
+}
+
+function findNextUnescapedLiteral(
+  line: string,
+  literal: string,
+  fromIndex: number,
+): number {
+  let index = line.indexOf(literal, fromIndex);
+  while (index >= 0 && isBackslashEscaped(line, index)) {
+    index = line.indexOf(literal, index + 1);
+  }
+  return index;
+}
+
+function isBackslashEscaped(line: string, index: number): boolean {
+  let backslashes = 0;
+  for (
+    let cursor = index - 1;
+    cursor >= 0 && line[cursor] === "\\";
+    cursor -= 1
+  ) {
+    backslashes += 1;
+  }
+  return backslashes % 2 === 1;
+}
+
+function htmlDelimitedClose(
+  construct: HtmlDelimitedConstruct,
+): "?>" | ">" | "]]>" {
+  if (construct === "processing-instruction") return "?>";
+  if (construct === "cdata") return "]]>";
+  return ">";
+}
+
+function findRawHtmlClose(
+  line: string,
+  fromIndex: number,
+  tag: RawHtmlTag,
+): number {
+  const pattern = new RegExp(`</${tag}[ \\t]*>`, "gi");
+  pattern.lastIndex = fromIndex;
+  return pattern.exec(line) ? pattern.lastIndex : -1;
+}
+
+function findNextHtmlTag(
+  line: string,
+  fromIndex: number,
+): HtmlTagToken | null {
+  const pattern = /<(\/?)([A-Za-z][A-Za-z0-9-]*)(?=[\s/>]|$)/g;
+  pattern.lastIndex = fromIndex;
+  let match = pattern.exec(line);
+  while (match && isBackslashEscaped(line, match.index)) {
+    match = pattern.exec(line);
+  }
+  if (!match || match.index < 0 || !match[2]) return null;
+
+  const end = findHtmlTagEnd(line, pattern.lastIndex);
+  const tagEnd = end ?? line.length;
+  return {
+    index: match.index,
+    end: tagEnd,
+    name: match[2].toLowerCase(),
+    closing: match[1] === "/",
+    selfClosing:
+      end !== null && /\/\s*>$/.test(line.slice(match.index, tagEnd)),
+    complete: end !== null,
+  };
+}
+
+function findHtmlTagEnd(line: string, fromIndex: number): number | null {
+  let quote: "'" | '"' | null = null;
+  for (let index = fromIndex; index < line.length; index += 1) {
+    const character = line[index];
+    if (quote) {
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+    } else if (character === ">") {
+      return index + 1;
+    }
+  }
+  return null;
+}
+
+function updateHtmlTagStack(
+  htmlTags: string[],
+  token: HtmlTagToken,
+): void {
+  if (token.closing) {
+    if (htmlTags.at(-1) === token.name) htmlTags.pop();
+    return;
+  }
+  if (token.selfClosing || HTML_VOID_TAGS.has(token.name)) return;
+  htmlTags.push(token.name);
 }
 
 function preferredLineEnding(tokens: readonly LineToken[]): LineToken["ending"] {

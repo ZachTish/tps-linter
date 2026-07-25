@@ -142,6 +142,30 @@
   margin-top: 20px;
 }
 
+.tps-linter-settings-reference {
+  margin: 10px 0 14px;
+  padding: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.45;
+}
+
+.tps-linter-settings-reference p {
+  margin: 0;
+}
+
+.tps-linter-settings-reference p + p {
+  margin-top: 8px;
+}
+
+.tps-linter-settings-reference code {
+  overflow-wrap: anywhere;
+  color: var(--text-normal);
+}
+
 @media (max-width: 640px) {
   .tps-linter-settings-actions,
   .tps-linter-settings-ownership,

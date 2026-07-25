@@ -25,11 +25,23 @@ interface SortableField {
 type ParsedYamlDocument = Document<Node, boolean>;
 
 const LINE_ENDING_AT_END = /(?:\r\n|\n|\r)$/;
+export const TPS_LINTER_MAX_FRONTMATTER_LINES = 2_000;
+export const TPS_LINTER_MAX_FRONTMATTER_FIELDS = 1_000;
 
 export function sortTopLevelFrontmatterFields(
   input: string,
   priorityKeys: readonly string[],
 ): FrontmatterSortResult {
+  if (
+    countPhysicalLines(input) >
+    TPS_LINTER_MAX_FRONTMATTER_LINES
+  ) {
+    return skipped(
+      input,
+      `Frontmatter exceeds the ${TPS_LINTER_MAX_FRONTMATTER_LINES.toLocaleString("en-US")}-line safety limit`,
+    );
+  }
+
   let document: ReturnType<typeof parseDocument>;
   try {
     document = parseDocument(input, {
@@ -44,6 +56,15 @@ export function sortTopLevelFrontmatterFields(
   const contents = document.contents;
   if (!isMap(contents)) {
     return skipped(input, "Top level is not a mapping");
+  }
+  if (
+    contents.items.length >
+    TPS_LINTER_MAX_FRONTMATTER_FIELDS
+  ) {
+    return skipped(
+      input,
+      `Frontmatter exceeds the ${TPS_LINTER_MAX_FRONTMATTER_FIELDS.toLocaleString("en-US")}-field safety limit`,
+    );
   }
 
   const keys: string[] = [];
@@ -184,6 +205,20 @@ function skipped(input: string, reason: string): FrontmatterSortResult {
   };
 }
 
+function countPhysicalLines(input: string): number {
+  if (input.length === 0) return 0;
+  let lines = 1;
+  for (let index = 0; index < input.length; index += 1) {
+    if (input[index] === "\r") {
+      if (input[index + 1] === "\n") index += 1;
+      lines += 1;
+    } else if (input[index] === "\n") {
+      lines += 1;
+    }
+  }
+  return lines;
+}
+
 function priorityIndex(keys: readonly string[]): Map<string, number> {
   const index = new Map<string, number>();
   for (const key of keys) {
@@ -213,9 +248,10 @@ function compareFields(
     return leftPriority - rightPriority;
   }
 
-  const comparison = left.key.localeCompare(right.key, undefined, {
-    sensitivity: "base",
-  });
+  const leftFolded = casefold(left.key);
+  const rightFolded = casefold(right.key);
+  const comparison =
+    leftFolded < rightFolded ? -1 : leftFolded > rightFolded ? 1 : 0;
   return comparison || left.originalIndex - right.originalIndex;
 }
 

@@ -10,6 +10,7 @@ import {
 } from "../src/settings.ts";
 
 const EXPECTED_SETTING_KEYS = [
+  "cleanFilenames",
   "cleanWhitespaceOnlyLines",
   "collapseConsecutiveBlankLines",
   "diagnostics",
@@ -21,6 +22,7 @@ const EXPECTED_SETTING_KEYS = [
   "normalizeHeadingLevels",
   "pushHeadingHierarchyToH6",
   "removeObsidianLinkCharacters",
+  "removeTrailingBlankLines",
   "schemaVersion",
   "sortFrontmatterFields",
   "trimNonblankTrailingWhitespace",
@@ -28,12 +30,14 @@ const EXPECTED_SETTING_KEYS = [
 
 test("settings defaults are conservative and TPS-specific", () => {
   assert.deepEqual(DEFAULT_SETTINGS, {
-    schemaVersion: 3,
+    schemaVersion: 4,
+    cleanFilenames: true,
     filenameUnsafeCharacterStyle: "space",
     removeObsidianLinkCharacters: false,
     cleanWhitespaceOnlyLines: true,
     collapseConsecutiveBlankLines: true,
     trimNonblankTrailingWhitespace: false,
+    removeTrailingBlankLines: false,
     ensureFinalNewline: true,
     headingCapitalizationStyle: "first-letter",
     normalizeHeadingLevels: true,
@@ -76,7 +80,7 @@ test("GCM property priority is trimmed, case-deduplicated, and fail-safe", () =>
   );
 });
 
-test("v3 settings contain no automatic mutation option", () => {
+test("v4 settings contain no automatic mutation option", () => {
   for (const key of [
     "automatic",
     "automaticMutation",
@@ -93,15 +97,17 @@ test("v3 settings contain no automatic mutation option", () => {
   }
 });
 
-test("normalization accepts valid values and stamps schema v3", () => {
+test("normalization accepts valid values and stamps schema v4", () => {
   assert.deepEqual(
     normalizeSettings({
       schemaVersion: 999,
+      cleanFilenames: false,
       filenameUnsafeCharacterStyle: "dash",
       removeObsidianLinkCharacters: true,
       cleanWhitespaceOnlyLines: false,
       collapseConsecutiveBlankLines: false,
       trimNonblankTrailingWhitespace: true,
+      removeTrailingBlankLines: true,
       ensureFinalNewline: false,
       headingCapitalizationStyle: "title-case",
       normalizeHeadingLevels: false,
@@ -113,11 +119,13 @@ test("normalization accepts valid values and stamps schema v3", () => {
     }),
     {
       schemaVersion: SETTINGS_SCHEMA_VERSION,
+      cleanFilenames: false,
       filenameUnsafeCharacterStyle: "dash",
       removeObsidianLinkCharacters: true,
       cleanWhitespaceOnlyLines: false,
       collapseConsecutiveBlankLines: false,
       trimNonblankTrailingWhitespace: true,
+      removeTrailingBlankLines: true,
       ensureFinalNewline: false,
       headingCapitalizationStyle: "title-case",
       normalizeHeadingLevels: false,
@@ -133,11 +141,13 @@ test("normalization accepts valid values and stamps schema v3", () => {
 test("invalid enum and primitive values safely fall back", () => {
   assert.deepEqual(
     normalizeSettings({
+      cleanFilenames: "yes",
       filenameUnsafeCharacterStyle: "underscore",
       removeObsidianLinkCharacters: "true",
       cleanWhitespaceOnlyLines: 0,
       collapseConsecutiveBlankLines: "yes",
       trimNonblankTrailingWhitespace: null,
+      removeTrailingBlankLines: "yes",
       ensureFinalNewline: {},
       headingCapitalizationStyle: "sentence-case",
       normalizeHeadingLevels: "true",
@@ -181,8 +191,24 @@ test("v2 migration adds the new heading option without restoring removed exclusi
     normalizeHeadingLevels: true,
   });
 
-  assert.equal(normalized.schemaVersion, 3);
+  assert.equal(normalized.schemaVersion, 4);
   assert.equal(normalized.pushHeadingHierarchyToH6, false);
+  assert.equal(normalized.cleanFilenames, true);
+  assert.equal(normalized.removeTrailingBlankLines, false);
+  assert.deepEqual(normalized.excludedPaths, ["Custom/Safe"]);
+});
+
+test("v3 migration preserves behavior and adds conservative v4 controls", () => {
+  const normalized = normalizeSettings({
+    schemaVersion: 3,
+    excludedPaths: ["Custom/Safe"],
+    pushHeadingHierarchyToH6: true,
+  });
+
+  assert.equal(normalized.schemaVersion, 4);
+  assert.equal(normalized.cleanFilenames, true);
+  assert.equal(normalized.removeTrailingBlankLines, false);
+  assert.equal(normalized.pushHeadingHierarchyToH6, true);
   assert.deepEqual(normalized.excludedPaths, ["Custom/Safe"]);
 });
 
@@ -255,11 +281,13 @@ test("settings UI preserves controls behind four accessible transient routes", (
     "Clear whitespace-only lines",
     "Trim nonblank trailing whitespace",
     "Ensure a final newline",
+    "Remove trailing blank lines",
     "Capitalize headings",
     "Normalize heading levels",
     "Push heading hierarchy down to H6",
     "First heading level",
     "Sort frontmatter fields",
+    "Clean filenames",
     "Unsafe character replacement",
     "Remove Obsidian link-control characters",
     "Excluded paths",
@@ -267,6 +295,9 @@ test("settings UI preserves controls behind four accessible transient routes", (
   ]) {
     assert.match(source, new RegExp(`setName\\("${settingName}"\\)`));
   }
+  assert.match(source, /Note-local controls/);
+  assert.match(source, /tps-linter-disabled-rules/);
+  assert.match(source, /tps-linter-disable/);
 
   assert.match(source, /Choose what to configure/);
   assert.match(source, /activeDestination: SettingsDestination = "clean-notes"/);
@@ -286,6 +317,7 @@ test("settings UI preserves controls behind four accessible transient routes", (
   assert.doesNotMatch(source, /createEl\(\s*["']summary["']/);
 
   assert.match(styles, /\.tps-linter-settings-route-strip/);
+  assert.match(styles, /\.tps-linter-settings-reference/);
   assert.match(styles, /\.tps-linter-settings-route:focus-visible/);
   assert.match(styles, /@media \(max-width: 640px\)/);
   assert.match(

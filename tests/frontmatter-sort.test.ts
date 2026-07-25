@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { sortTopLevelFrontmatterFields } from "../src/frontmatter-sort.ts";
+import {
+  TPS_LINTER_MAX_FRONTMATTER_FIELDS,
+  TPS_LINTER_MAX_FRONTMATTER_LINES,
+  sortTopLevelFrontmatterFields,
+} from "../src/frontmatter-sort.ts";
 
 test("priority fields lead and remaining fields sort case-insensitively", () => {
   const input = [
@@ -109,6 +113,29 @@ test("sorting is idempotent", () => {
   });
 });
 
+test("non-priority key ordering is locale-independent and deterministic", () => {
+  const input = [
+    "éclair: 1\n",
+    "Zulu: 2\n",
+    "alpha: 3\n",
+    "Ångström: 4\n",
+  ].join("");
+  const first = sortTopLevelFrontmatterFields(input, []);
+  const second = sortTopLevelFrontmatterFields(first.output, []);
+
+  assert.equal(
+    first.output,
+    [
+      "alpha: 3\n",
+      "Zulu: 2\n",
+      "Ångström: 4\n",
+      "éclair: 1\n",
+    ].join(""),
+  );
+  assert.equal(second.changed, false);
+  assert.equal(second.output, first.output);
+});
+
 test("only fields whose positions change count as reordered", () => {
   const result = sortTopLevelFrontmatterFields(
     "alpha: 1\ngamma: 3\nbeta: 2\n",
@@ -169,4 +196,23 @@ test("directives, anchors, aliases, merge keys, and tags fail closed", () => {
     assert.equal(result.fieldsReordered, 0, input);
     assert.ok(result.skippedReason, input);
   }
+});
+
+test("frontmatter line and field work budgets fail closed before rewriting", () => {
+  const tooManyFields = Array.from(
+    { length: TPS_LINTER_MAX_FRONTMATTER_FIELDS + 1 },
+    (_value, index) => `field-${String(index).padStart(4, "0")}: ${index}\n`,
+  ).reverse().join("");
+  const fieldResult = sortTopLevelFrontmatterFields(tooManyFields, []);
+  assert.equal(fieldResult.output, tooManyFields);
+  assert.equal(fieldResult.changed, false);
+  assert.match(fieldResult.skippedReason ?? "", /field safety limit/);
+
+  const tooManyLines =
+    "value: |\n" +
+    "  safe block content\n".repeat(TPS_LINTER_MAX_FRONTMATTER_LINES);
+  const lineResult = sortTopLevelFrontmatterFields(tooManyLines, []);
+  assert.equal(lineResult.output, tooManyLines);
+  assert.equal(lineResult.changed, false);
+  assert.match(lineResult.skippedReason ?? "", /line safety limit/);
 });
