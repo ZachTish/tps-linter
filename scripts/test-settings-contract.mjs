@@ -7,11 +7,13 @@ import { fileURLToPath } from "node:url";
 const sourceRoot = fileURLToPath(new URL("../src/", import.meta.url));
 const manifest = JSON.parse(readFileSync(new URL("../manifest.json", import.meta.url), "utf8"));
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+const packageLock = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
 const versions = JSON.parse(readFileSync(new URL("../versions.json", import.meta.url), "utf8"));
 const mainSource = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
 const cleanerSource = readFileSync(new URL("../src/cleaner.ts", import.meta.url), "utf8");
 const gcmCompatSource = readFileSync(new URL("../src/gcm-compat.ts", import.meta.url), "utf8");
 const lintControlsSource = readFileSync(new URL("../src/lint-controls.ts", import.meta.url), "utf8");
+const saveLintSchedulerSource = readFileSync(new URL("../src/save-lint-scheduler.ts", import.meta.url), "utf8");
 const settingsTabSource = readFileSync(new URL("../src/settings-tab.ts", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const esbuildSource = readFileSync(new URL("../esbuild.config.mjs", import.meta.url), "utf8");
@@ -21,15 +23,19 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.4.0",
+    version: "0.5.0",
     minAppVersion: "1.10.0",
-    description: "TPS-specific note and filename cleanup with explicit, ownership-safe actions.",
+    description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
     authorUrl: "https://github.com/ZachTish",
     isDesktopOnly: false,
   });
   assert.equal(packageJson.name, manifest.id);
   assert.equal(packageJson.version, manifest.version);
+  assert.equal(packageLock.name, manifest.id);
+  assert.equal(packageLock.version, manifest.version);
+  assert.equal(packageLock.packages?.[""]?.name, manifest.id);
+  assert.equal(packageLock.packages?.[""]?.version, manifest.version);
   assert.equal(packageJson.type, "module");
   assert.equal(packageJson.license, "MIT");
   assert.equal(packageJson.dependencies?.yaml, "2.9.0");
@@ -38,6 +44,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.2.0": "1.10.0",
     "0.3.0": "1.10.0",
     "0.4.0": "1.10.0",
+    "0.5.0": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -48,7 +55,7 @@ test("TPS Linter exposes explicit check and clean commands", () => {
   assert.match(mainSource, /name:\s*["']Clean current note["']/);
 });
 
-test("TPS Linter remains explicit-only and keeps filename ownership with GCM", () => {
+test("save linting is active-note scoped and keeps automatic filename ownership with GCM", () => {
   assert.match(
     settingsTabSource,
     /TPS Global Context Menu currently owns automatic title and filename synchronization\./,
@@ -56,15 +63,16 @@ test("TPS Linter remains explicit-only and keeps filename ownership with GCM", (
   assert.match(settingsTabSource, /setButtonText\(["']Open GCM settings["']\)/);
   assert.match(settingsTabSource, /openPluginSettings\(["']tps-global-context-menu["']\)/);
 
-  assert.doesNotMatch(
-    allSource,
-    /\.vault\.on\(\s*["'](?:create|modify|rename)["']/,
-    "TPS Linter must not register automatic create, modify, or rename hooks",
+  assert.equal(
+    (mainSource.match(/\.vault\.on\(\s*["']modify["']/g) ?? []).length,
+    1,
+    "TPS Linter should register one supported modify hook",
   );
+  assert.match(mainSource, /this\.queueSaveLint\(file\)/);
   assert.doesNotMatch(
     allSource,
-    /\.vault\.on\(/,
-    "TPS Linter must not register any automatic vault hook",
+    /\.vault\.on\(\s*["'](?:create|rename|delete)["']/,
+    "save linting must not add create, rename, or delete hooks",
   );
   assert.doesNotMatch(
     allSource,
@@ -72,6 +80,81 @@ test("TPS Linter remains explicit-only and keeps filename ownership with GCM", (
     "TPS Linter must not register automatic workspace cleanup hooks",
   );
   assert.doesNotMatch(allSource, /\bsetInterval\s*\(/);
+
+  const queueSource = sourceBetween(
+    mainSource,
+    "  private queueSaveLint(file: TAbstractFile): void {",
+    "  private async lintFileOnSave(file: TFile): Promise<void> {",
+  );
+  assert.match(queueSource, /this\.settings\.lintOnSave/);
+  assert.match(queueSource, /this\.saveLintLifecycle\.isActive\(\)/);
+  assert.match(queueSource, /file\.extension !== "md"/);
+  assert.match(queueSource, /this\.getActiveEditingView\(file\)/);
+  assert.match(queueSource, /inspectPathExclusion\(/);
+  assert.match(queueSource, /this\.saveLintScheduler\?\.request\(file\)/);
+
+  const saveSource = sourceBetween(
+    mainSource,
+    "  private async lintFileOnSave(file: TFile): Promise<void> {",
+    "  getGcmFilenameOwnership(): FilenameOwnershipStatus {",
+  );
+  assert.match(saveSource, /const freshContent = await this\.app\.vault\.read\(file\)/);
+  assert.match(
+    saveSource,
+    /const lifecycleGeneration = this\.saveLintLifecycle\.capture\(\)/,
+  );
+  assert.ok(
+    (saveSource.match(
+      /this\.saveLintLifecycle\.isCurrent\(lifecycleGeneration\)/g,
+    ) ?? []).length >= 3,
+    "save lint must guard entry, post-read preflight, and the process callback",
+  );
+  assert.match(saveSource, /if \(!preflight\.changed\)/);
+  assert.match(saveSource, /await this\.app\.vault\.process\(file,/);
+  assert.match(saveSource, /mergeExcludedPaths\(/);
+  assert.match(saveSource, /this\.settings\.lintOnSave/);
+  assert.match(saveSource, /currentView\.editor\.getValue\(\)/);
+  assert.match(saveSource, /processView\.editor\.getValue\(\)/);
+  assert.match(saveSource, /editorContentMatchesFile\(/);
+  assert.match(saveSource, /the editor has newer unsaved content/);
+  assert.match(
+    saveSource,
+    /cleanMarkdown\(\s*currentContent,\s*this\.markdownOptions\(\),?\s*\)/,
+    "the atomic callback must resolve current rule settings",
+  );
+  assert.doesNotMatch(
+    saveSource,
+    /cleanMarkdown\(currentContent,\s*markdownOptions\)/,
+    "the atomic callback must not reuse a stale options snapshot",
+  );
+  assert.doesNotMatch(saveSource, /createFilenamePlan|createFilenameDecision/);
+  assert.doesNotMatch(saveSource, /renameFile|new Notice/);
+
+  assert.match(saveLintSchedulerSource, /rerunRequested/);
+  assert.match(saveLintSchedulerSource, /cancelPending\(\)/);
+  assert.match(saveLintSchedulerSource, /dispose\(\)/);
+
+  const unloadSource = sourceBetween(
+    mainSource,
+    "  onunload(): void {",
+    "  async loadSettings(): Promise<void> {",
+  );
+  assert.ok(
+    unloadSource.indexOf("this.saveLintLifecycle.invalidate()") <
+      unloadSource.indexOf("this.saveLintScheduler?.dispose()"),
+    "unload must invalidate in-flight work before disposing queued work",
+  );
+
+  const onloadSource = sourceBetween(
+    mainSource,
+    "  async onload(): Promise<void> {",
+    "  onunload(): void {",
+  );
+  assert.match(
+    onloadSource,
+    /await this\.loadSettings\(\);\s*if \(!this\.saveLintLifecycle\.isCurrent\(lifecycleGeneration\)\)/,
+    "onload must not initialize after an unload during settings I/O",
+  );
 });
 
 test("TPS Linter follows GCM frontmatter priority without invoking its mutator", () => {
@@ -106,9 +189,9 @@ test("clean always takes a fresh preflight and enters the atomic process path", 
     /const content = readFresh\s*\?\s*await this\.app\.vault\.read\(liveFile\)\s*:\s*await this\.app\.vault\.cachedRead\(liveFile\)/,
   );
   assert.equal(
-    (mainSource.match(/this\.app\.vault\.process\(/g) ?? []).length,
+    (cleanFileSource.match(/this\.app\.vault\.process\(/g) ?? []).length,
     1,
-    "the clean workflow should have one unconditional atomic process entry",
+    "the manual clean workflow should have one unconditional atomic process entry",
   );
   assert.doesNotMatch(
     cleanFileSource,
@@ -132,7 +215,7 @@ test("clean always takes a fresh preflight and enters the atomic process path", 
   assert.match(allSource, /\.fileManager\.renameFile\(/, "filename cleanup must use fileManager.renameFile");
 });
 
-test("same-file cleans serialize without introducing background work", () => {
+test("same-file cleans serialize with save reruns preserved", () => {
   const cleanWithNoticeSource = sourceBetween(
     mainSource,
     "  private async cleanFileWithNotice(",
@@ -147,6 +230,14 @@ test("same-file cleans serialize without introducing background work", () => {
     cleanWithNoticeSource,
     /finally\s*\{\s*this\.activeCleans\.delete\(file\);\s*\}/,
   );
+  const saveSource = sourceBetween(
+    mainSource,
+    "  private async lintFileOnSave(file: TFile): Promise<void> {",
+    "  getGcmFilenameOwnership(): FilenameOwnershipStatus {",
+  );
+  assert.match(saveSource, /if \(this\.activeCleans\.has\(file\)\)/);
+  assert.match(saveSource, /this\.saveLintScheduler\?\.request\(file\)/);
+  assert.match(saveSource, /finally\s*\{\s*this\.activeCleans\.delete\(file\);\s*\}/);
 });
 
 test("filename collision checks stay sibling-local and never scan the vault", () => {
@@ -250,6 +341,7 @@ test("note-local controls, range markers, and idempotence gates remain stable", 
     "final-newline",
     "heading-capitalization",
     "heading-levels",
+    "frontmatter-blank-line",
     "frontmatter-sort",
     "all",
   ]) {
@@ -333,6 +425,8 @@ test("note-local controls, range markers, and idempotence gates remain stable", 
 });
 
 test("TPS Linter settings destinations stay accessible, responsive, and namespaced", () => {
+  assert.match(settingsTabSource, /setName\("Lint notes on save"\)/);
+  assert.match(settingsTabSource, /setName\("Add blank line after frontmatter"\)/);
   assert.match(settingsTabSource, /tps-linter-settings-actions/);
   assert.match(settingsTabSource, /tps-linter-settings-ownership/);
   assert.doesNotMatch(settingsTabSource, /createEl\(\s*["']details["']/);

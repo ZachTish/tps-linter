@@ -8,7 +8,12 @@ import {
   type Document,
   type Node,
 } from "yaml";
-import { TPS_LINTER_MAX_FRONTMATTER_LINES } from "./frontmatter-sort.ts";
+import {
+  TPS_LINTER_MAX_FRONTMATTER_CHARACTERS,
+  TPS_LINTER_MAX_FRONTMATTER_LINES,
+} from "./frontmatter-sort.ts";
+
+export { TPS_LINTER_MAX_FRONTMATTER_CHARACTERS };
 
 export const TPS_LINTER_CONTROL_KEY = "tps-linter" as const;
 export const TPS_LINTER_DISABLED_RULES_KEY =
@@ -28,6 +33,7 @@ export const TPS_LINTER_RULE_IDS = Object.freeze([
   "final-newline",
   "heading-capitalization",
   "heading-levels",
+  "frontmatter-blank-line",
   "frontmatter-sort",
   "all",
 ] as const);
@@ -53,7 +59,6 @@ type ParsedYamlDocument = Document<Node, boolean>;
 const RULE_IDS = new Set<string>(TPS_LINTER_RULE_IDS);
 const CONTROL_KEY_TEXT =
   /(?:^|[^A-Za-z0-9_-])tps-linter(?:-disabled-rules)?(?=$|[^A-Za-z0-9_-])/m;
-export const TPS_LINTER_MAX_FRONTMATTER_CHARACTERS = 500_000;
 
 export function parseLintControls(markdown: string): LintControlResult {
   const frontmatter = readFrontmatter(markdown);

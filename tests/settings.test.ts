@@ -14,11 +14,13 @@ const EXPECTED_SETTING_KEYS = [
   "cleanWhitespaceOnlyLines",
   "collapseConsecutiveBlankLines",
   "diagnostics",
+  "ensureBlankLineAfterFrontmatter",
   "ensureFinalNewline",
   "excludedPaths",
   "filenameUnsafeCharacterStyle",
   "headingCapitalizationStyle",
   "headingStartLevel",
+  "lintOnSave",
   "normalizeHeadingLevels",
   "pushHeadingHierarchyToH6",
   "removeObsidianLinkCharacters",
@@ -30,7 +32,8 @@ const EXPECTED_SETTING_KEYS = [
 
 test("settings defaults are conservative and TPS-specific", () => {
   assert.deepEqual(DEFAULT_SETTINGS, {
-    schemaVersion: 4,
+    schemaVersion: 5,
+    lintOnSave: true,
     cleanFilenames: true,
     filenameUnsafeCharacterStyle: "space",
     removeObsidianLinkCharacters: false,
@@ -44,6 +47,7 @@ test("settings defaults are conservative and TPS-specific", () => {
     pushHeadingHierarchyToH6: false,
     headingStartLevel: 1,
     sortFrontmatterFields: true,
+    ensureBlankLineAfterFrontmatter: false,
     excludedPaths: [
       "Templates",
       "Recurring Templates",
@@ -80,27 +84,22 @@ test("GCM property priority is trimmed, case-deduplicated, and fail-safe", () =>
   );
 });
 
-test("v4 settings contain no automatic mutation option", () => {
-  for (const key of [
-    "automatic",
-    "automaticMutation",
-    "lintOnSave",
-    "lintOnFileChange",
-    "cleanOnSave",
-  ]) {
-    assert.equal(key in DEFAULT_SETTINGS, false);
-    assert.equal(
-      key in normalizeSettings({ [key]: true }),
-      false,
-      `${key} must remain ignored`,
-    );
-  }
+test("schema v5 enables active-note save linting and keeps frontmatter spacing opt-in", () => {
+  assert.equal(DEFAULT_SETTINGS.lintOnSave, true);
+  assert.equal(DEFAULT_SETTINGS.ensureBlankLineAfterFrontmatter, false);
+  assert.equal(normalizeSettings({ lintOnSave: false }).lintOnSave, false);
+  assert.equal(
+    normalizeSettings({ ensureBlankLineAfterFrontmatter: true })
+      .ensureBlankLineAfterFrontmatter,
+    true,
+  );
 });
 
-test("normalization accepts valid values and stamps schema v4", () => {
+test("normalization accepts valid values and stamps schema v5", () => {
   assert.deepEqual(
     normalizeSettings({
       schemaVersion: 999,
+      lintOnSave: false,
       cleanFilenames: false,
       filenameUnsafeCharacterStyle: "dash",
       removeObsidianLinkCharacters: true,
@@ -114,11 +113,13 @@ test("normalization accepts valid values and stamps schema v4", () => {
       pushHeadingHierarchyToH6: true,
       headingStartLevel: 2,
       sortFrontmatterFields: false,
+      ensureBlankLineAfterFrontmatter: true,
       excludedPaths: [],
       diagnostics: true,
     }),
     {
       schemaVersion: SETTINGS_SCHEMA_VERSION,
+      lintOnSave: false,
       cleanFilenames: false,
       filenameUnsafeCharacterStyle: "dash",
       removeObsidianLinkCharacters: true,
@@ -132,6 +133,7 @@ test("normalization accepts valid values and stamps schema v4", () => {
       pushHeadingHierarchyToH6: true,
       headingStartLevel: 2,
       sortFrontmatterFields: false,
+      ensureBlankLineAfterFrontmatter: true,
       excludedPaths: [],
       diagnostics: true,
     },
@@ -141,6 +143,7 @@ test("normalization accepts valid values and stamps schema v4", () => {
 test("invalid enum and primitive values safely fall back", () => {
   assert.deepEqual(
     normalizeSettings({
+      lintOnSave: "yes",
       cleanFilenames: "yes",
       filenameUnsafeCharacterStyle: "underscore",
       removeObsidianLinkCharacters: "true",
@@ -154,6 +157,7 @@ test("invalid enum and primitive values safely fall back", () => {
       pushHeadingHierarchyToH6: "yes",
       headingStartLevel: 3,
       sortFrontmatterFields: null,
+      ensureBlankLineAfterFrontmatter: "yes",
       excludedPaths: "Templates",
       diagnostics: 1,
     }),
@@ -191,23 +195,41 @@ test("v2 migration adds the new heading option without restoring removed exclusi
     normalizeHeadingLevels: true,
   });
 
-  assert.equal(normalized.schemaVersion, 4);
+  assert.equal(normalized.schemaVersion, 5);
+  assert.equal(normalized.lintOnSave, true);
+  assert.equal(normalized.ensureBlankLineAfterFrontmatter, false);
   assert.equal(normalized.pushHeadingHierarchyToH6, false);
   assert.equal(normalized.cleanFilenames, true);
   assert.equal(normalized.removeTrailingBlankLines, false);
   assert.deepEqual(normalized.excludedPaths, ["Custom/Safe"]);
 });
 
-test("v3 migration preserves behavior and adds conservative v4 controls", () => {
+test("v3 migration preserves behavior and adds schema v5 controls", () => {
   const normalized = normalizeSettings({
     schemaVersion: 3,
     excludedPaths: ["Custom/Safe"],
     pushHeadingHierarchyToH6: true,
   });
 
-  assert.equal(normalized.schemaVersion, 4);
+  assert.equal(normalized.schemaVersion, 5);
+  assert.equal(normalized.lintOnSave, true);
+  assert.equal(normalized.ensureBlankLineAfterFrontmatter, false);
   assert.equal(normalized.cleanFilenames, true);
   assert.equal(normalized.removeTrailingBlankLines, false);
+  assert.equal(normalized.pushHeadingHierarchyToH6, true);
+  assert.deepEqual(normalized.excludedPaths, ["Custom/Safe"]);
+});
+
+test("v4 migration enables requested save linting and keeps new spacing off", () => {
+  const normalized = normalizeSettings({
+    schemaVersion: 4,
+    excludedPaths: ["Custom/Safe"],
+    pushHeadingHierarchyToH6: true,
+  });
+
+  assert.equal(normalized.schemaVersion, 5);
+  assert.equal(normalized.lintOnSave, true);
+  assert.equal(normalized.ensureBlankLineAfterFrontmatter, false);
   assert.equal(normalized.pushHeadingHierarchyToH6, true);
   assert.deepEqual(normalized.excludedPaths, ["Custom/Safe"]);
 });
@@ -277,6 +299,7 @@ test("settings UI preserves controls behind four accessible transient routes", (
   }
 
   for (const settingName of [
+    "Lint notes on save",
     "Remove extra blank lines",
     "Clear whitespace-only lines",
     "Trim nonblank trailing whitespace",
@@ -287,6 +310,7 @@ test("settings UI preserves controls behind four accessible transient routes", (
     "Push heading hierarchy down to H6",
     "First heading level",
     "Sort frontmatter fields",
+    "Add blank line after frontmatter",
     "Clean filenames",
     "Unsafe character replacement",
     "Remove Obsidian link-control characters",

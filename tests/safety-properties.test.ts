@@ -36,6 +36,7 @@ test("generated Markdown cleanup is deterministic, idempotent, and line-ending s
       pushHeadingHierarchyToH6: random() < 0.5,
       headingStartLevel: random() < 0.5 ? 1 : 2,
       sortFrontmatterFields: random() < 0.7,
+      ensureBlankLineAfterFrontmatter: random() < 0.5,
       frontmatterPriorityKeys: ["status", "priority", "tags"],
     };
 
@@ -72,6 +73,7 @@ test("generated protected-only documents remain byte-identical", () => {
     pushHeadingHierarchyToH6: true,
     headingStartLevel: 1,
     sortFrontmatterFields: false,
+    ensureBlankLineAfterFrontmatter: false,
     frontmatterPriorityKeys: ["status", "priority", "tags"],
   };
 
@@ -129,6 +131,7 @@ test("arbitrary Markdown-like code-unit streams never throw and converge", () =>
     pushHeadingHierarchyToH6: true,
     headingStartLevel: 1,
     sortFrontmatterFields: true,
+    ensureBlankLineAfterFrontmatter: true,
     frontmatterPriorityKeys: ["status", "priority", "tags"],
   };
 

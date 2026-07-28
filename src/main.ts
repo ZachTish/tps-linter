@@ -1,6 +1,7 @@
 import {
   App,
   Menu,
+  MarkdownView,
   Notice,
   Plugin,
   TAbstractFile,
@@ -40,8 +41,14 @@ import {
   type TPSLinterSettings,
 } from "./settings";
 import { TPSLinterSettingTab } from "./settings-tab";
+import {
+  SaveLintLifecycle,
+  SaveLintScheduler,
+  editorContentMatchesFile,
+} from "./save-lint-scheduler";
 
 type CleanupTrigger = "command" | "file-menu" | "settings";
+const SAVE_LINT_DEBOUNCE_MS = 500;
 
 interface FileInspection {
   file: TFile;
@@ -62,9 +69,24 @@ interface CleanResult {
 export default class TPSLinterPlugin extends Plugin {
   settings!: TPSLinterSettings;
   private readonly activeCleans = new WeakSet<TFile>();
+  private readonly saveLintLifecycle = new SaveLintLifecycle();
+  private saveLintScheduler: SaveLintScheduler<TFile> | null = null;
 
   async onload(): Promise<void> {
+    const lifecycleGeneration = this.saveLintLifecycle.activate();
     await this.loadSettings();
+    if (!this.saveLintLifecycle.isCurrent(lifecycleGeneration)) {
+      return;
+    }
+    this.saveLintScheduler = new SaveLintScheduler<TFile>(
+      async (file) => this.lintFileOnSave(file),
+      {
+        delayMs: SAVE_LINT_DEBOUNCE_MS,
+        onError: (error, file) => {
+          logError("save", file.path, "automatic clean failed", error);
+        },
+      },
+    );
     this.addSettingTab(new TPSLinterSettingTab(this.app, this));
 
     this.addCommand({
@@ -82,6 +104,12 @@ export default class TPSLinterPlugin extends Plugin {
         void this.cleanActiveNote("command", true);
       },
     });
+
+    this.registerEvent(
+      this.app.vault.on("modify", (file: TAbstractFile) => {
+        this.queueSaveLint(file);
+      }),
+    );
 
     this.registerEvent(
       this.app.workspace.on(
@@ -114,6 +142,9 @@ export default class TPSLinterPlugin extends Plugin {
   }
 
   onunload(): void {
+    this.saveLintLifecycle.invalidate();
+    this.saveLintScheduler?.dispose();
+    this.saveLintScheduler = null;
     logDiagnostic("unload", this.manifest.id, "complete");
   }
 
@@ -125,7 +156,196 @@ export default class TPSLinterPlugin extends Plugin {
   async saveSettings(): Promise<void> {
     this.settings = normalizeSettings(this.settings);
     setDiagnosticsEnabled(this.settings.diagnostics);
+    if (!this.settings.lintOnSave) {
+      this.saveLintScheduler?.cancelPending();
+    }
     await this.saveData(this.settings);
+  }
+
+  private queueSaveLint(file: TAbstractFile): void {
+    if (
+      !this.saveLintLifecycle.isActive() ||
+      !this.settings.lintOnSave ||
+      !(file instanceof TFile) ||
+      file.extension !== "md"
+    ) {
+      return;
+    }
+
+    if (!this.getActiveEditingView(file)) {
+      return;
+    }
+
+    const exclusion = inspectPathExclusion(
+      file.path,
+      this.settings.excludedPaths,
+    );
+    if (exclusion.excluded) {
+      logDiagnostic(
+        "save",
+        file.path,
+        `not queued: ${exclusion.reason ?? "excluded"}`,
+      );
+      return;
+    }
+    this.saveLintScheduler?.request(file);
+  }
+
+  private async lintFileOnSave(file: TFile): Promise<void> {
+    const lifecycleGeneration = this.saveLintLifecycle.capture();
+    if (
+      !this.saveLintLifecycle.isCurrent(lifecycleGeneration) ||
+      !this.settings.lintOnSave
+    ) {
+      return;
+    }
+
+    const liveFile = this.app.vault.getFileByPath(file.path);
+    if (
+      liveFile !== file ||
+      file.extension !== "md" ||
+      !this.getActiveEditingView(file)
+    ) {
+      logDiagnostic(
+        "save",
+        file.path,
+        "skipped: note is no longer the active Markdown editor",
+      );
+      return;
+    }
+
+    const initialExcludedPaths = [...this.settings.excludedPaths];
+    const initialExclusion = inspectPathExclusion(
+      file.path,
+      initialExcludedPaths,
+    );
+    if (initialExclusion.excluded) {
+      logDiagnostic(
+        "save",
+        file.path,
+        `skipped: ${initialExclusion.reason ?? "excluded"}`,
+      );
+      return;
+    }
+
+    if (this.activeCleans.has(file)) {
+      this.saveLintScheduler?.request(file);
+      return;
+    }
+
+    this.activeCleans.add(file);
+    try {
+      const freshContent = await this.app.vault.read(file);
+      const preflightExclusion = inspectPathExclusion(
+        file.path,
+        mergeExcludedPaths(
+          initialExcludedPaths,
+          this.settings.excludedPaths,
+        ),
+      );
+      const currentView = this.getActiveEditingView(file);
+      const editorIsCurrent =
+        currentView !== null &&
+        editorContentMatchesFile(
+          currentView.editor.getValue(),
+          freshContent,
+        );
+      if (
+        !this.saveLintLifecycle.isCurrent(lifecycleGeneration) ||
+        !this.settings.lintOnSave ||
+        this.app.vault.getFileByPath(file.path) !== file ||
+        !currentView ||
+        !editorIsCurrent ||
+        preflightExclusion.excluded
+      ) {
+        logDiagnostic(
+          "save",
+          file.path,
+          `skipped before process: ${preflightExclusion.reason ?? (!editorIsCurrent ? "the editor has newer unsaved content" : "save scope changed")}`,
+        );
+        return;
+      }
+
+      const preflight = cleanMarkdown(
+        freshContent,
+        this.markdownOptions(),
+      );
+      if (!preflight.changed) {
+        logDiagnostic(
+          "save",
+          file.path,
+          this.describeMarkdown(preflight, false),
+        );
+        return;
+      }
+
+      let result = preflight;
+      let guardReason: string | null = null;
+      await this.app.vault.process(file, (currentContent) => {
+        const processView = this.getActiveEditingView(file);
+        const processEditorIsCurrent =
+          processView !== null &&
+          editorContentMatchesFile(
+            processView.editor.getValue(),
+            currentContent,
+          );
+        const exclusion = inspectPathExclusion(
+          file.path,
+          mergeExcludedPaths(
+            initialExcludedPaths,
+            this.settings.excludedPaths,
+          ),
+        );
+        if (
+          !this.saveLintLifecycle.isCurrent(lifecycleGeneration) ||
+          !this.settings.lintOnSave ||
+          this.app.vault.getFileByPath(file.path) !== file ||
+          !processView ||
+          !processEditorIsCurrent ||
+          exclusion.excluded
+        ) {
+          guardReason =
+            exclusion.reason ??
+            (!this.saveLintLifecycle.isCurrent(lifecycleGeneration)
+              ? "the plugin lifecycle ended"
+              : !this.settings.lintOnSave
+                ? "lint on save was disabled"
+                : !processEditorIsCurrent
+                ? "the editor has newer unsaved content"
+                : "the active-editor scope changed");
+          return currentContent;
+        }
+
+        result = cleanMarkdown(
+          currentContent,
+          this.markdownOptions(),
+        );
+        return result.output;
+      });
+
+      if (guardReason) {
+        logDiagnostic(
+          "save",
+          file.path,
+          `skipped during process: ${guardReason}`,
+        );
+        return;
+      }
+      logDiagnostic(
+        "save",
+        file.path,
+        this.describeMarkdown(result, result.changed),
+      );
+    } finally {
+      this.activeCleans.delete(file);
+    }
+  }
+
+  private getActiveEditingView(file: TFile): MarkdownView | null {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    return view?.file === file && view.getMode() === "source"
+      ? view
+      : null;
   }
 
   getGcmFilenameOwnership(): FilenameOwnershipStatus {
@@ -489,6 +709,8 @@ export default class TPSLinterPlugin extends Plugin {
       pushHeadingHierarchyToH6: this.settings.pushHeadingHierarchyToH6,
       headingStartLevel: this.settings.headingStartLevel,
       sortFrontmatterFields: this.settings.sortFrontmatterFields,
+      ensureBlankLineAfterFrontmatter:
+        this.settings.ensureBlankLineAfterFrontmatter,
       frontmatterPriorityKeys: this.getFrontmatterPriorityKeys(),
     };
   }
@@ -639,6 +861,13 @@ export default class TPSLinterPlugin extends Plugin {
     if (reorderedFields > 0) {
       actions.push(
         `${applied ? "reordered" : "reorder"} ${reorderedFields} frontmatter ${plural("field", reorderedFields)}`,
+      );
+    }
+    if (result.changes.frontmatterBlankLineAdded) {
+      actions.push(
+        applied
+          ? "added a blank line after frontmatter"
+          : "add a blank line after frontmatter",
       );
     }
     if (result.changes.finalNewlineAdded) {

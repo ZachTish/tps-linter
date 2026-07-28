@@ -26,6 +26,7 @@ const DEFAULT_MARKDOWN_OPTIONS = {
   pushHeadingHierarchyToH6: false,
   headingStartLevel: 1 as const,
   sortFrontmatterFields: true,
+  ensureBlankLineAfterFrontmatter: false,
   frontmatterPriorityKeys: [
     "status",
     "priority",
@@ -301,6 +302,7 @@ test("Markdown cleanup preserves BOM and every existing line separator", () => {
     headingsCapitalized: 0,
     headingLevelsAdjusted: 0,
     frontmatterFieldsReordered: 0,
+    frontmatterBlankLineAdded: false,
     frontmatterSortSkippedReason: null,
     finalNewlineAdded: true,
   });
@@ -1853,6 +1855,7 @@ test("empty and already-clean Markdown are no-ops and cleanup is idempotent", ()
       headingsCapitalized: 0,
       headingLevelsAdjusted: 0,
       frontmatterFieldsReordered: 0,
+      frontmatterBlankLineAdded: false,
       frontmatterSortSkippedReason: null,
       finalNewlineAdded: false,
     },

@@ -25,13 +25,91 @@ interface SortableField {
 type ParsedYamlDocument = Document<Node, boolean>;
 
 const LINE_ENDING_AT_END = /(?:\r\n|\n|\r)$/;
+export const TPS_LINTER_MAX_FRONTMATTER_CHARACTERS = 500_000;
 export const TPS_LINTER_MAX_FRONTMATTER_LINES = 2_000;
 export const TPS_LINTER_MAX_FRONTMATTER_FIELDS = 1_000;
+
+export function inspectTopLevelFrontmatterSafety(
+  input: string,
+): string | null {
+  if (input.length > TPS_LINTER_MAX_FRONTMATTER_CHARACTERS) {
+    return `Frontmatter exceeds the ${TPS_LINTER_MAX_FRONTMATTER_CHARACTERS.toLocaleString("en-US")}-character safety limit`;
+  }
+  if (
+    countPhysicalLines(input) >
+    TPS_LINTER_MAX_FRONTMATTER_LINES
+  ) {
+    return `Frontmatter exceeds the ${TPS_LINTER_MAX_FRONTMATTER_LINES.toLocaleString("en-US")}-line safety limit`;
+  }
+
+  let document: ReturnType<typeof parseDocument>;
+  try {
+    document = parseDocument(input, {
+      keepSourceTokens: true,
+      strict: true,
+      uniqueKeys: true,
+    });
+  } catch {
+    return "YAML parse error";
+  }
+
+  if (document.errors.length > 0) {
+    return "YAML parse error";
+  }
+  if (document.warnings.length > 0) {
+    return "YAML parse warning";
+  }
+  if (
+    document.directives?.yaml.explicit ||
+    document.directives?.docStart ||
+    document.directives?.docEnd
+  ) {
+    return "YAML directives or document markers";
+  }
+
+  const contents = document.contents;
+  if (contents === null) {
+    return null;
+  }
+  if (!isMap(contents)) {
+    return "Top level is not a mapping";
+  }
+  if (
+    contents.items.length >
+    TPS_LINTER_MAX_FRONTMATTER_FIELDS
+  ) {
+    return `Frontmatter exceeds the ${TPS_LINTER_MAX_FRONTMATTER_FIELDS.toLocaleString("en-US")}-field safety limit`;
+  }
+
+  const keys: string[] = [];
+  for (const pair of contents.items) {
+    if (!isScalar(pair.key) || typeof pair.key.value !== "string") {
+      return "Top-level key is not a scalar string";
+    }
+    keys.push(pair.key.value);
+  }
+  if (
+    new Set(keys).size !== keys.length ||
+    new Set(keys.map(casefold)).size !== keys.length
+  ) {
+    return "Duplicate top-level key";
+  }
+  if (usesUnsafeYamlFeature(document)) {
+    return "Anchor, alias, merge key, or explicit tag";
+  }
+  return null;
+}
 
 export function sortTopLevelFrontmatterFields(
   input: string,
   priorityKeys: readonly string[],
 ): FrontmatterSortResult {
+  if (input.length > TPS_LINTER_MAX_FRONTMATTER_CHARACTERS) {
+    return skipped(
+      input,
+      `Frontmatter exceeds the ${TPS_LINTER_MAX_FRONTMATTER_CHARACTERS.toLocaleString("en-US")}-character safety limit`,
+    );
+  }
   if (
     countPhysicalLines(input) >
     TPS_LINTER_MAX_FRONTMATTER_LINES

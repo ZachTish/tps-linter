@@ -1,4 +1,7 @@
-import { sortTopLevelFrontmatterFields } from "./frontmatter-sort.ts";
+import {
+  inspectTopLevelFrontmatterSafety,
+  sortTopLevelFrontmatterFields,
+} from "./frontmatter-sort.ts";
 import type { FilenameOwnershipStatus } from "./gcm-compat.ts";
 import {
   TPS_LINTER_RULE_IDS,
@@ -57,6 +60,7 @@ export interface MarkdownCleanupOptions {
   pushHeadingHierarchyToH6: boolean;
   headingStartLevel: 1 | 2;
   sortFrontmatterFields: boolean;
+  ensureBlankLineAfterFrontmatter: boolean;
   frontmatterPriorityKeys: readonly string[];
 }
 
@@ -68,6 +72,7 @@ export interface MarkdownCleanupChanges {
   headingsCapitalized: number;
   headingLevelsAdjusted: number;
   frontmatterFieldsReordered: number;
+  frontmatterBlankLineAdded: boolean;
   frontmatterSortSkippedReason: string | null;
   finalNewlineAdded: boolean;
 }
@@ -533,6 +538,7 @@ function cleanMarkdownOnce(
     headingsCapitalized: 0,
     headingLevelsAdjusted: 0,
     frontmatterFieldsReordered: 0,
+    frontmatterBlankLineAdded: false,
     frontmatterSortSkippedReason: null,
     finalNewlineAdded: false,
   };
@@ -546,6 +552,15 @@ function cleanMarkdownOnce(
     workingInput = frontmatter.output;
     changes.frontmatterFieldsReordered = frontmatter.fieldsReordered;
     changes.frontmatterSortSkippedReason = frontmatter.skippedReason;
+  }
+
+  if (options.ensureBlankLineAfterFrontmatter) {
+    const spacing = addBlankLineAfterFrontmatter(
+      workingInput,
+      options.cleanWhitespaceOnlyLines,
+    );
+    workingInput = spacing.output;
+    changes.frontmatterBlankLineAdded = spacing.added;
   }
 
   const tokens = splitLinesPreservingEndings(workingInput);
@@ -871,6 +886,9 @@ function applyDisabledRules(
     sortFrontmatterFields:
       options.sortFrontmatterFields &&
       !disabledRules.has("frontmatter-sort"),
+    ensureBlankLineAfterFrontmatter:
+      options.ensureBlankLineAfterFrontmatter &&
+      !disabledRules.has("frontmatter-blank-line"),
   };
 }
 
@@ -901,6 +919,7 @@ function unchangedMarkdownResult(
       headingsCapitalized: 0,
       headingLevelsAdjusted: 0,
       frontmatterFieldsReordered: 0,
+      frontmatterBlankLineAdded: false,
       frontmatterSortSkippedReason: null,
       finalNewlineAdded: false,
     },
@@ -983,6 +1002,67 @@ interface DocumentFrontmatterSortResult {
   output: string;
   fieldsReordered: number;
   skippedReason: string | null;
+}
+
+interface FrontmatterSpacingResult {
+  output: string;
+  added: boolean;
+}
+
+function addBlankLineAfterFrontmatter(
+  input: string,
+  cleanWhitespaceOnlyLines: boolean,
+): FrontmatterSpacingResult {
+  const tokens = splitLinesPreservingEndings(input);
+  const first = tokens[0];
+  if (
+    !first ||
+    !/^---[ \t]*$/.test(first.body.replace(/^\uFEFF/, ""))
+  ) {
+    return { output: input, added: false };
+  }
+
+  const closingIndex = tokens.findIndex(
+    (token, index) =>
+      index > 0 && /^(?:---|\.\.\.)[ \t]*$/.test(token.body),
+  );
+  const closing = tokens[closingIndex];
+  const firstBody = tokens[closingIndex + 1];
+  const firstBodyIsWhitespaceOnly =
+    firstBody !== undefined && /^[ \t]*$/.test(firstBody.body);
+  const cleanedSeparatorWouldMergeWithClosing =
+    firstBody !== undefined &&
+    firstBody.body.length > 0 &&
+    firstBodyIsWhitespaceOnly &&
+    cleanWhitespaceOnlyLines &&
+    closing?.ending === "\r" &&
+    firstBody.ending === "\n";
+  if (
+    closingIndex < 0 ||
+    !closing ||
+    closing.ending === "" ||
+    !firstBody ||
+    (firstBodyIsWhitespaceOnly && !cleanedSeparatorWouldMergeWithClosing)
+  ) {
+    return { output: input, added: false };
+  }
+
+  const frontmatterBody = tokens
+    .slice(1, closingIndex)
+    .map((token) => `${token.body}${token.ending}`)
+    .join("");
+  if (inspectTopLevelFrontmatterSafety(frontmatterBody) !== null) {
+    return { output: input, added: false };
+  }
+
+  const output = [
+    ...tokens.slice(0, closingIndex + 1),
+    { body: "", ending: closing.ending },
+    ...tokens.slice(closingIndex + 1),
+  ]
+    .map((token) => `${token.body}${token.ending}`)
+    .join("");
+  return { output, added: true };
 }
 
 function sortDocumentFrontmatter(

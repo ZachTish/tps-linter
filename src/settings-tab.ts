@@ -27,7 +27,7 @@ const SETTINGS_DESTINATIONS: ReadonlyArray<{
   {
     id: "clean-notes",
     label: "Clean notes",
-    description: "Blank lines and whitespace",
+    description: "Save workflow and whitespace",
   },
   {
     id: "headings",
@@ -37,7 +37,7 @@ const SETTINGS_DESTINATIONS: ReadonlyArray<{
   {
     id: "frontmatter",
     label: "Frontmatter",
-    description: "Top-level field order",
+    description: "Field order and body spacing",
   },
   {
     id: "files-safety",
@@ -65,7 +65,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
     containerEl.createEl("h2", { text: "TPS Linter" });
     containerEl.createEl("p", {
       cls: "tps-linter-settings-intro",
-      text: "Check first, then clean one explicit Markdown note. TPS Linter performs no background or whole-vault cleanup.",
+      text: "Check or clean one Markdown note. Lint on save can automatically clean the active Markdown editor; TPS Linter never scans the whole vault.",
     });
 
     this.renderActions(containerEl);
@@ -228,6 +228,18 @@ export class TPSLinterSettingTab extends PluginSettingTab {
     parent.createEl("h3", { text: "Clean notes" });
 
     new Setting(parent)
+      .setName("Lint notes on save")
+      .setDesc("Automatically clean the active Markdown editor after Obsidian persists a modification. Filename cleanup remains manual, and no whole-vault scan runs.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.lintOnSave)
+          .onChange(async (value) => {
+            this.plugin.settings.lintOnSave = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(parent)
       .setName("Remove extra blank lines")
       .setDesc("Collapse consecutive blank lines to one outside protected YAML, code, math, raw HTML, and Templater regions.")
       .addToggle((toggle) => {
@@ -293,7 +305,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
 
     new Setting(parent)
       .setName("Capitalize headings")
-      .setDesc("Choose how explicit cleaning adjusts plain ATX heading text. First letter is the conservative TPS default.")
+      .setDesc("Choose how cleanup adjusts plain ATX heading text. First letter is the conservative TPS default.")
       .addDropdown((dropdown) => {
         dropdown
           .addOption("off", "Off")
@@ -369,6 +381,18 @@ export class TPSLinterSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.sortFrontmatterFields)
           .onChange(async (value) => {
             this.plugin.settings.sortFrontmatterFields = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(parent)
+      .setName("Add blank line after frontmatter")
+      .setDesc("Insert one empty line when a valid top-of-note frontmatter block is immediately followed by body content. Existing blank spacing is left to the blank-line rules.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.ensureBlankLineAfterFrontmatter)
+          .onChange(async (value) => {
+            this.plugin.settings.ensureBlankLineAfterFrontmatter = value;
             await this.plugin.saveSettings();
           });
       });
@@ -451,7 +475,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
     const ruleCopy = reference.createEl("p");
     ruleCopy.appendText("Rule IDs: ");
     ruleCopy.createEl("code", {
-      text: "filename, whitespace-only-lines, blank-lines, trailing-whitespace, trailing-blank-lines, final-newline, heading-capitalization, heading-levels, frontmatter-sort, all",
+      text: "filename, whitespace-only-lines, blank-lines, trailing-whitespace, trailing-blank-lines, final-newline, heading-capitalization, heading-levels, frontmatter-blank-line, frontmatter-sort, all",
     });
     ruleCopy.appendText(".");
 

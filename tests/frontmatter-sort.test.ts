@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  TPS_LINTER_MAX_FRONTMATTER_CHARACTERS,
   TPS_LINTER_MAX_FRONTMATTER_FIELDS,
   TPS_LINTER_MAX_FRONTMATTER_LINES,
+  inspectTopLevelFrontmatterSafety,
   sortTopLevelFrontmatterFields,
 } from "../src/frontmatter-sort.ts";
 
@@ -198,7 +200,34 @@ test("directives, anchors, aliases, merge keys, and tags fail closed", () => {
   }
 });
 
-test("frontmatter line and field work budgets fail closed before rewriting", () => {
+test("frontmatter character, line, and field work budgets fail closed before rewriting", () => {
+  const blockLine = `  ${"x".repeat(560)}\n`;
+  const tooManyCharacters =
+    "payload: |\n" + blockLine.repeat(900);
+  assert.ok(
+    tooManyCharacters.length >
+      TPS_LINTER_MAX_FRONTMATTER_CHARACTERS,
+  );
+  assert.ok(
+    tooManyCharacters.split("\n").length <
+      TPS_LINTER_MAX_FRONTMATTER_LINES,
+  );
+  assert.match(
+    inspectTopLevelFrontmatterSafety(tooManyCharacters) ?? "",
+    /character safety limit/,
+  );
+  const characterResult = sortTopLevelFrontmatterFields(
+    tooManyCharacters,
+    [],
+  );
+  assert.equal(characterResult.output, tooManyCharacters);
+  assert.equal(characterResult.changed, false);
+  assert.equal(characterResult.fieldsReordered, 0);
+  assert.match(
+    characterResult.skippedReason ?? "",
+    /character safety limit/,
+  );
+
   const tooManyFields = Array.from(
     { length: TPS_LINTER_MAX_FRONTMATTER_FIELDS + 1 },
     (_value, index) => `field-${String(index).padStart(4, "0")}: ${index}\n`,

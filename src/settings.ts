@@ -1,4 +1,4 @@
-export const SETTINGS_SCHEMA_VERSION = 4 as const;
+export const SETTINGS_SCHEMA_VERSION = 5 as const;
 
 export type FilenameUnsafeCharacterStyle = "space" | "dash" | "remove";
 export type HeadingCapitalizationStyle =
@@ -9,6 +9,7 @@ export type HeadingStartLevel = 1 | 2;
 
 export interface TPSLinterSettings {
   schemaVersion: typeof SETTINGS_SCHEMA_VERSION;
+  lintOnSave: boolean;
   cleanFilenames: boolean;
   filenameUnsafeCharacterStyle: FilenameUnsafeCharacterStyle;
   removeObsidianLinkCharacters: boolean;
@@ -22,6 +23,7 @@ export interface TPSLinterSettings {
   pushHeadingHierarchyToH6: boolean;
   headingStartLevel: HeadingStartLevel;
   sortFrontmatterFields: boolean;
+  ensureBlankLineAfterFrontmatter: boolean;
   excludedPaths: string[];
   diagnostics: boolean;
 }
@@ -52,6 +54,7 @@ export const DEFAULT_TPS_FRONTMATTER_PRIORITY_KEYS = Object.freeze([
 
 export const DEFAULT_SETTINGS: ReadonlyTPSLinterSettings = Object.freeze({
   schemaVersion: SETTINGS_SCHEMA_VERSION,
+  lintOnSave: true,
   cleanFilenames: true,
   filenameUnsafeCharacterStyle: "space",
   removeObsidianLinkCharacters: false,
@@ -65,6 +68,7 @@ export const DEFAULT_SETTINGS: ReadonlyTPSLinterSettings = Object.freeze({
   pushHeadingHierarchyToH6: false,
   headingStartLevel: 1,
   sortFrontmatterFields: true,
+  ensureBlankLineAfterFrontmatter: false,
   excludedPaths: DEFAULT_EXCLUDED_PATHS,
   diagnostics: false,
 });
@@ -93,6 +97,10 @@ export function normalizeSettings(loadedData: unknown): TPSLinterSettings {
 
   return {
     schemaVersion: SETTINGS_SCHEMA_VERSION,
+    lintOnSave: readBoolean(
+      data.lintOnSave,
+      DEFAULT_SETTINGS.lintOnSave,
+    ),
     cleanFilenames: readBoolean(
       data.cleanFilenames,
       DEFAULT_SETTINGS.cleanFilenames,
@@ -145,6 +153,10 @@ export function normalizeSettings(loadedData: unknown): TPSLinterSettings {
     sortFrontmatterFields: readBoolean(
       data.sortFrontmatterFields,
       DEFAULT_SETTINGS.sortFrontmatterFields,
+    ),
+    ensureBlankLineAfterFrontmatter: readBoolean(
+      data.ensureBlankLineAfterFrontmatter,
+      DEFAULT_SETTINGS.ensureBlankLineAfterFrontmatter,
     ),
     excludedPaths: normalizeExcludedPaths(
       data.excludedPaths,

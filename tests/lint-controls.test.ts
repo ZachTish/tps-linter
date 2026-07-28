@@ -30,6 +30,7 @@ test("exports stable namespaced control keys and rule IDs", () => {
     "final-newline",
     "heading-capitalization",
     "heading-levels",
+    "frontmatter-blank-line",
     "frontmatter-sort",
     "all",
   ]);
