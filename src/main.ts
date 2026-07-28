@@ -266,10 +266,10 @@ export default class TPSLinterPlugin extends Plugin {
         return;
       }
 
-      const preflight = cleanMarkdown(
-        freshContent,
-        this.markdownOptions(),
-      );
+      const preflightOptions = this.markdownOptions();
+      const preflightOptionsFingerprint =
+        JSON.stringify(preflightOptions);
+      const preflight = cleanMarkdown(freshContent, preflightOptions);
       if (!preflight.changed) {
         logDiagnostic(
           "save",
@@ -316,10 +316,12 @@ export default class TPSLinterPlugin extends Plugin {
           return currentContent;
         }
 
-        result = cleanMarkdown(
-          currentContent,
-          this.markdownOptions(),
-        );
+        const processOptions = this.markdownOptions();
+        result =
+          currentContent === freshContent &&
+          JSON.stringify(processOptions) === preflightOptionsFingerprint
+            ? preflight
+            : cleanMarkdown(currentContent, processOptions);
         return result.output;
       });
 

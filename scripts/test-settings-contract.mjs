@@ -23,7 +23,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.5.0",
+    version: "0.5.1",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
@@ -45,6 +45,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.3.0": "1.10.0",
     "0.4.0": "1.10.0",
     "0.5.0": "1.10.0",
+    "0.5.1": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -119,13 +120,18 @@ test("save linting is active-note scoped and keeps automatic filename ownership 
   assert.match(saveSource, /the editor has newer unsaved content/);
   assert.match(
     saveSource,
-    /cleanMarkdown\(\s*currentContent,\s*this\.markdownOptions\(\),?\s*\)/,
+    /const processOptions = this\.markdownOptions\(\)/,
     "the atomic callback must resolve current rule settings",
+  );
+  assert.match(
+    saveSource,
+    /currentContent === freshContent[\s\S]*JSON\.stringify\(processOptions\) === preflightOptionsFingerprint[\s\S]*\? preflight[\s\S]*: cleanMarkdown\(currentContent, processOptions\)/,
+    "an unchanged revision may reuse the verified preflight only when current rule settings match",
   );
   assert.doesNotMatch(
     saveSource,
-    /cleanMarkdown\(currentContent,\s*markdownOptions\)/,
-    "the atomic callback must not reuse a stale options snapshot",
+    /cleanMarkdown\(currentContent,\s*preflightOptions\)/,
+    "a changed revision must not use the preflight options snapshot",
   );
   assert.doesNotMatch(saveSource, /createFilenamePlan|createFilenameDecision/);
   assert.doesNotMatch(saveSource, /renameFile|new Notice/);

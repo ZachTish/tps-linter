@@ -56,6 +56,40 @@ test("editor/file comparison tolerates representation-only BOM and line-ending d
   );
 });
 
+test("editor/file comparison exactly matches the former normalization semantics", () => {
+  const fragments = [
+    "a",
+    "b",
+    "\n",
+    "\r",
+    "\r\n",
+    "\uFEFF",
+    "\ud83e",
+    "\uddea",
+  ];
+  const samples = [""];
+  for (const first of fragments) {
+    samples.push(first);
+    for (const second of fragments) {
+      samples.push(`${first}${second}`);
+    }
+  }
+
+  const referenceMatches = (left: string, right: string): boolean =>
+    left.replace(/^\uFEFF/, "").replace(/\r\n|\r/g, "\n") ===
+    right.replace(/^\uFEFF/, "").replace(/\r\n|\r/g, "\n");
+
+  for (const editorContent of samples) {
+    for (const fileContent of samples) {
+      assert.equal(
+        editorContentMatchesFile(editorContent, fileContent),
+        referenceMatches(editorContent, fileContent),
+        `editor=${JSON.stringify(editorContent)} file=${JSON.stringify(fileContent)}`,
+      );
+    }
+  }
+});
+
 test("lifecycle generations invalidate in-flight work across unload and reactivation", () => {
   const lifecycle = new SaveLintLifecycle();
 

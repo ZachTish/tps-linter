@@ -17,7 +17,8 @@ export interface FrontmatterSortResult {
 }
 
 interface SortableField {
-  key: string;
+  foldedKey: string;
+  priority: number | undefined;
   originalIndex: number;
   raw: string;
 }
@@ -146,16 +147,18 @@ export function sortTopLevelFrontmatterFields(
   }
 
   const keys: string[] = [];
+  const foldedKeys: string[] = [];
   for (const pair of contents.items) {
     if (!isScalar(pair.key) || typeof pair.key.value !== "string") {
       return skipped(input, "Top-level key is not a scalar string");
     }
     keys.push(pair.key.value);
+    foldedKeys.push(casefold(pair.key.value));
   }
 
   if (
     new Set(keys).size !== keys.length ||
-    new Set(keys.map(casefold)).size !== keys.length
+    new Set(foldedKeys).size !== keys.length
   ) {
     return skipped(input, "Duplicate top-level key");
   }
@@ -185,31 +188,32 @@ export function sortTopLevelFrontmatterFields(
     return skipped(input, "Unsupported top-level mapping style");
   }
 
+  const priority = priorityIndex(priorityKeys);
   const fields: SortableField[] = [];
   for (let index = 0; index < contents.items.length; index += 1) {
     const pair = contents.items[index];
     const sourceItem = sourceToken.items[index];
     const key = keys[index];
+    const foldedKey = foldedKeys[index];
     if (
       !pair ||
       !sourceItem ||
       key === undefined ||
+      foldedKey === undefined ||
       !pair.srcToken ||
       pair.srcToken !== sourceItem
     ) {
       return skipped(input, "YAML source token mismatch");
     }
     fields.push({
-      key,
+      foldedKey,
+      priority: priority.get(foldedKey),
       originalIndex: index,
       raw: CST.stringify(sourceItem),
     });
   }
 
-  const priority = priorityIndex(priorityKeys);
-  const sortedFields = [...fields].sort((left, right) =>
-    compareFields(left, right, priority),
-  );
+  const sortedFields = [...fields].sort(compareFields);
   const fieldsReordered = sortedFields.reduce(
     (count, field, index) =>
       count + (field.originalIndex === index ? 0 : 1),
@@ -311,10 +315,9 @@ function priorityIndex(keys: readonly string[]): Map<string, number> {
 function compareFields(
   left: SortableField,
   right: SortableField,
-  priority: ReadonlyMap<string, number>,
 ): number {
-  const leftPriority = priority.get(casefold(left.key));
-  const rightPriority = priority.get(casefold(right.key));
+  const leftPriority = left.priority;
+  const rightPriority = right.priority;
 
   if (leftPriority !== undefined || rightPriority !== undefined) {
     if (leftPriority === undefined) {
@@ -326,10 +329,12 @@ function compareFields(
     return leftPriority - rightPriority;
   }
 
-  const leftFolded = casefold(left.key);
-  const rightFolded = casefold(right.key);
   const comparison =
-    leftFolded < rightFolded ? -1 : leftFolded > rightFolded ? 1 : 0;
+    left.foldedKey < right.foldedKey
+      ? -1
+      : left.foldedKey > right.foldedKey
+        ? 1
+        : 0;
   return comparison || left.originalIndex - right.originalIndex;
 }
 

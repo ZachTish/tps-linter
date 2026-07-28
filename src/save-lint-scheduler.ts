@@ -38,6 +38,10 @@ export function editorContentMatchesFile(
   editorContent: string,
   fileContent: string,
 ): boolean {
+  if (editorContent === fileContent) {
+    return true;
+  }
+
   return normalizeEditorComparison(editorContent) ===
     normalizeEditorComparison(fileContent);
 }
@@ -74,7 +78,6 @@ export class SaveLintLifecycle {
     return this.active && this.generation === generation;
   }
 }
-
 /**
  * Debounces work independently per item and serializes repeat work for an item.
  *
