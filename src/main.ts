@@ -46,6 +46,7 @@ import {
   SaveLintScheduler,
   editorContentMatchesFile,
 } from "./save-lint-scheduler";
+import { isCurrentMarkdownFile } from "./vault-file-identity";
 
 type CleanupTrigger = "command" | "file-menu" | "settings";
 const SAVE_LINT_DEBOUNCE_MS = 500;
@@ -469,14 +470,17 @@ export default class TPSLinterPlugin extends Plugin {
     filenameOptions = this.filenameOptions(),
     filenameCleaningEnabled = this.settings.cleanFilenames,
   ): Promise<SourceFileInspection> {
-    const liveFile = this.app.vault.getFileByPath(file.path);
-    if (!(liveFile instanceof TFile) || liveFile.extension !== "md") {
+    const liveFile = file;
+    if (!isCurrentMarkdownFile(this.app.vault, liveFile)) {
       throw new Error("The selected Markdown file is no longer available.");
     }
 
     const content = readFresh
       ? await this.app.vault.read(liveFile)
       : await this.app.vault.cachedRead(liveFile);
+    if (!isCurrentMarkdownFile(this.app.vault, liveFile)) {
+      throw new Error("The selected Markdown file is no longer available.");
+    }
     const contentSafetyBlock = inspectMarkdownInputSafety(content);
     const lintControls = contentSafetyBlock
       ? safetyBlockedLintControls(contentSafetyBlock)
@@ -514,15 +518,35 @@ export default class TPSLinterPlugin extends Plugin {
     );
     let contentChanged = false;
     let currentMarkdown = initialInspection.markdown;
-    let guardReason: string | null = null;
+    const processGuard: { decision: FilenameRenameDecision | null } = {
+      decision: null,
+    };
 
     await this.app.vault.process(initialInspection.file, (currentContent) => {
+      if (
+        !isCurrentMarkdownFile(
+          this.app.vault,
+          initialInspection.file,
+        )
+      ) {
+        processGuard.decision = {
+          allowed: false,
+          reason: "invalid-plan",
+          detail: "the selected note changed or disappeared during cleanup",
+        };
+        return currentContent;
+      }
+
       const exclusion = inspectPathExclusion(
         initialInspection.file.path,
         mergeExcludedPaths(initialExcludedPaths, this.settings.excludedPaths),
       );
       if (exclusion.excluded) {
-        guardReason = exclusion.reason ?? "the note became excluded";
+        processGuard.decision = {
+          allowed: false,
+          reason: "path-excluded",
+          detail: exclusion.reason ?? "the note became excluded",
+        };
         return currentContent;
       }
 
@@ -534,12 +558,10 @@ export default class TPSLinterPlugin extends Plugin {
       return currentMarkdown.output;
     });
 
-    if (guardReason) {
-      const filenameDecision: FilenameRenameDecision = {
-        allowed: false,
-        reason: "path-excluded",
-        detail: guardReason,
-      };
+    if (processGuard.decision) {
+      const filenameDecision = processGuard.decision;
+      const guardReason =
+        filenameDecision.detail ?? "the manual-clean safety scope changed";
       return {
         inspection: {
           ...initialInspection,
@@ -553,8 +575,8 @@ export default class TPSLinterPlugin extends Plugin {
       };
     }
 
-    const liveFile = this.app.vault.getFileByPath(initialInspection.file.path);
-    if (!(liveFile instanceof TFile) || liveFile.extension !== "md") {
+    const liveFile = initialInspection.file;
+    if (!isCurrentMarkdownFile(this.app.vault, liveFile)) {
       const filenameDecision: FilenameRenameDecision = {
         allowed: false,
         reason: "invalid-plan",
@@ -595,36 +617,47 @@ export default class TPSLinterPlugin extends Plugin {
         };
       } else {
         const liveContent = await this.app.vault.read(liveFile);
-        const finalExclusion = inspectPathExclusion(
-          liveFile.path,
-          mergeExcludedPaths(initialExcludedPaths, this.settings.excludedPaths),
-        );
-        if (finalExclusion.excluded) {
+        if (!isCurrentMarkdownFile(this.app.vault, liveFile)) {
           filenameDecision = {
             allowed: false,
-            reason: "path-excluded",
-            detail: finalExclusion.reason ?? "the note became excluded",
+            reason: "invalid-plan",
+            detail: "The file changed or disappeared during filename cleanup.",
           };
         } else {
-          const contentSafetyBlock =
-            inspectMarkdownInputSafety(liveContent);
-          lintControls = contentSafetyBlock
-            ? safetyBlockedLintControls(contentSafetyBlock)
-            : parseLintControls(liveContent);
-          filenamePlan = this.createFilenamePlan(liveFile, filenameOptions);
-          filenameDecision = this.createFilenameDecision(
-            filenamePlan,
-            liveFile,
-            lintControls,
-            filenameCleaningEnabled && this.settings.cleanFilenames,
+          const finalExclusion = inspectPathExclusion(
+            liveFile.path,
+            mergeExcludedPaths(
+              initialExcludedPaths,
+              this.settings.excludedPaths,
+            ),
           );
-
-          if (filenameDecision.allowed) {
-            await this.app.fileManager.renameFile(
+          if (finalExclusion.excluded) {
+            filenameDecision = {
+              allowed: false,
+              reason: "path-excluded",
+              detail: finalExclusion.reason ?? "the note became excluded",
+            };
+          } else {
+            const contentSafetyBlock =
+              inspectMarkdownInputSafety(liveContent);
+            lintControls = contentSafetyBlock
+              ? safetyBlockedLintControls(contentSafetyBlock)
+              : parseLintControls(liveContent);
+            filenamePlan = this.createFilenamePlan(liveFile, filenameOptions);
+            filenameDecision = this.createFilenameDecision(
+              filenamePlan,
               liveFile,
-              filenamePlan.targetPath,
+              lintControls,
+              filenameCleaningEnabled && this.settings.cleanFilenames,
             );
-            filenameChanged = true;
+
+            if (filenameDecision.allowed) {
+              await this.app.fileManager.renameFile(
+                liveFile,
+                filenamePlan.targetPath,
+              );
+              filenameChanged = true;
+            }
           }
         }
       }

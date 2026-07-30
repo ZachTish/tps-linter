@@ -15,6 +15,7 @@ const gcmCompatSource = readFileSync(new URL("../src/gcm-compat.ts", import.meta
 const lintControlsSource = readFileSync(new URL("../src/lint-controls.ts", import.meta.url), "utf8");
 const saveLintSchedulerSource = readFileSync(new URL("../src/save-lint-scheduler.ts", import.meta.url), "utf8");
 const settingsTabSource = readFileSync(new URL("../src/settings-tab.ts", import.meta.url), "utf8");
+const vaultFileIdentitySource = readFileSync(new URL("../src/vault-file-identity.ts", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 const esbuildSource = readFileSync(new URL("../esbuild.config.mjs", import.meta.url), "utf8");
 const allSource = readTypeScriptTree(sourceRoot);
@@ -23,7 +24,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.5.2",
+    version: "0.5.3",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
@@ -47,6 +48,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.5.0": "1.10.0",
     "0.5.1": "1.10.0",
     "0.5.2": "1.10.0",
+    "0.5.3": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -193,7 +195,7 @@ test("clean always takes a fresh preflight and enters the atomic process path", 
   const processSource = sourceBetween(
     cleanFileSource,
     "    await this.app.vault.process(initialInspection.file, (currentContent) => {",
-    "\n\n    if (guardReason) {",
+    "\n\n    if (processGuard.decision) {",
   );
 
   assert.match(
@@ -254,6 +256,101 @@ test("clean always takes a fresh preflight and enters the atomic process path", 
   );
   assert.match(allSource, /\.vault\.process\(/, "note cleanup must use Vault.process");
   assert.match(allSource, /\.fileManager\.renameFile\(/, "filename cleanup must use fileManager.renameFile");
+});
+
+test("manual inspection and clean never hand work to a same-path replacement", () => {
+  const inspectFileSource = sourceBetween(
+    mainSource,
+    "  private async inspectFile(",
+    "  private async cleanFile(file: TFile): Promise<CleanResult> {",
+  );
+  const cleanFileSource = sourceBetween(
+    mainSource,
+    "  private async cleanFile(file: TFile): Promise<CleanResult> {",
+    "  private createFilenamePlan(",
+  );
+  const processSource = sourceBetween(
+    cleanFileSource,
+    "    await this.app.vault.process(initialInspection.file, (currentContent) => {",
+    "\n\n    if (processGuard.decision) {",
+  );
+  const postProcessSource = sourceBetween(
+    cleanFileSource,
+    "    const liveFile = initialInspection.file;",
+    "    let filenamePlan = this.createFilenamePlan(liveFile, filenameOptions);",
+  );
+  const finalReadSource = sourceBetween(
+    cleanFileSource,
+    "        const liveContent = await this.app.vault.read(liveFile);",
+    "          if (filenameDecision.allowed) {",
+  );
+
+  assert.match(
+    vaultFileIdentitySource,
+    /file\.extension === "md" && vault\.getFileByPath\(file\.path\) === file/,
+    "current-file checks must use strict object identity and the Markdown type",
+  );
+  assert.equal(
+    (inspectFileSource.match(
+      /isCurrentMarkdownFile\(this\.app\.vault,\s*liveFile\)/g,
+    ) ?? []).length,
+    2,
+    "inspection must check identity before and after its asynchronous read",
+  );
+  const inspectionCheck = "isCurrentMarkdownFile(this.app.vault, liveFile)";
+  const firstInspectionCheck = inspectFileSource.indexOf(inspectionCheck);
+  const inspectionRead = inspectFileSource.indexOf("const content = readFresh");
+  const secondInspectionCheck = inspectFileSource.indexOf(
+    inspectionCheck,
+    firstInspectionCheck + inspectionCheck.length,
+  );
+  assert.ok(
+    firstInspectionCheck < inspectionRead &&
+      inspectionRead < secondInspectionCheck,
+    "the inspection identity checks must bracket the asynchronous read",
+  );
+  assert.match(
+    processSource,
+    /isCurrentMarkdownFile\(\s*this\.app\.vault,\s*initialInspection\.file,\s*\)/,
+    "the atomic callback must return the current bytes when the indexed file identity changed",
+  );
+  const processIdentityCheck = processSource.indexOf(
+    "!isCurrentMarkdownFile(",
+  );
+  const processExclusion = processSource.indexOf(
+    "const exclusion = inspectPathExclusion(",
+  );
+  const processIdentityGuard = processSource.slice(
+    processIdentityCheck,
+    processExclusion,
+  );
+  assert.match(processIdentityGuard, /reason:\s*"invalid-plan"/);
+  assert.match(processIdentityGuard, /return currentContent;/);
+  assert.ok(
+    processSource.indexOf("isCurrentMarkdownFile(") <
+      processSource.indexOf("cleanMarkdown(currentContent, markdownOptions)"),
+    "identity must be checked before the process callback cleans content",
+  );
+  assert.match(
+    postProcessSource,
+    /if \(!isCurrentMarkdownFile\(this\.app\.vault,\s*liveFile\)\)/,
+    "post-process filename work must stay attached to the processed object",
+  );
+  assert.match(
+    finalReadSource,
+    /if \(!isCurrentMarkdownFile\(this\.app\.vault,\s*liveFile\)\)/,
+    "the final asynchronous read must be followed by one last identity and type check",
+  );
+  assert.ok(
+    finalReadSource.indexOf("isCurrentMarkdownFile(") <
+      finalReadSource.indexOf("parseLintControls(liveContent)"),
+    "a replacement must be rejected before control parsing, planning, or rename",
+  );
+  assert.doesNotMatch(
+    cleanFileSource,
+    /getFileByPath\([^)]*\.path\)[\s\S]{0,120}instanceof TFile[\s\S]{0,120}createFilenamePlan/,
+    "a same-path TFile must not be accepted for filename work by type alone",
+  );
 });
 
 test("same-file cleans serialize with save reruns preserved", () => {

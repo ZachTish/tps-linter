@@ -1,10 +1,10 @@
 # TPS Linter
 
-TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.5.2` makes manual Clean more efficient without changing its rules, outputs, settings, or guards. Manual Check/Clean actions, note-local controls, protected Markdown, bounded-work guards, and ownership-safe filename cleanup remain available.
+TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.5.3` keeps manual inspection, cleaning, and filename work attached to the exact selected note across asynchronous boundaries. Manual Check/Clean actions, note-local controls, protected Markdown, bounded-work guards, and ownership-safe filename cleanup remain available.
 
 ## Install with BRAT
 
-Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.5.2`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
+Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.5.3`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
 
 The released build is validated in the isolated Obsidian Plugin Test Vault. Publishing the release does not install it in the production vault; the production update remains a separate user-owned BRAT pull.
 
@@ -141,7 +141,7 @@ Diagnostics are disabled by default. When enabled, TPS Linter logs only compact 
 
 The plugin has no network access, credentials, scheduled sweep, startup scan, create hook, rename hook, file-open hook, deletion, archive movement, or production deployment path. It registers exactly one supported Vault `modify` hook for active-note save linting and no undocumented save-command patch.
 
-Every manual Clean takes a fresh read, snapshots rule options, and enters one unconditional `Vault.process` callback. When the callback receives exactly the same bytes, it reuses the already verified preflight result; any byte difference, including BOM or line-ending representation, runs the original cleanup against the current revision. Same-file manual and automatic cleans are serialized. The save scheduler debounces independently per note; an event during a run requests one delayed rerun, worker failures cannot wedge its state, disabling the setting cancels pending timers, and plugin unload invalidates in-flight work before preventing reruns. The automatic worker rechecks enablement, plugin lifecycle, active editor/file identity, source mode, Markdown type, initial-plus-live exclusions, current rule settings, and that the editor buffer still matches the persisted revision at the asynchronous mutation boundaries. Representation-only BOM and LF/CRLF/CR differences are tolerated; exact editor/file matches avoid normalization allocations. Real unsaved edits cause a no-write skip until the next persisted modification. Its own modify event converges through a no-write preflight rather than relying on timing-sensitive suppression; when both the persisted bytes and complete rule options remain identical at `Vault.process`, that verified pure cleanup result is reused instead of cleaning the same revision twice. Manual path exclusions are rechecked without relaxing the initial scope inside the callback, before filename planning, and after the final fresh read. Note-local controls and filename ownership are re-read before manual rename eligibility. Markdown success is reported even if a later rename fails.
+Every manual Clean takes a fresh read, snapshots rule options, and enters one unconditional `Vault.process` callback. When the callback receives exactly the same bytes, it reuses the already verified preflight result; any byte difference, including BOM or line-ending representation, runs the original cleanup against the current revision. Manual inspection and cleaning require the selected Markdown `TFile` to remain the exact object currently indexed by the vault before and after inspection reads, inside the process callback, after processing, and after the final filename read. A deleted and recreated same-path note never inherits content or filename work; the plugin does not retry, reacquire by path, or use adapter-level mutation. Same-file manual and automatic cleans are serialized. The save scheduler debounces independently per note; an event during a run requests one delayed rerun, worker failures cannot wedge its state, disabling the setting cancels pending timers, and plugin unload invalidates in-flight work before preventing reruns. The automatic worker rechecks enablement, plugin lifecycle, active editor/file identity, source mode, Markdown type, initial-plus-live exclusions, current rule settings, and that the editor buffer still matches the persisted revision at the asynchronous mutation boundaries. Representation-only BOM and LF/CRLF/CR differences are tolerated; exact editor/file matches avoid normalization allocations. Real unsaved edits cause a no-write skip until the next persisted modification. Its own modify event converges through a no-write preflight rather than relying on timing-sensitive suppression; when both the persisted bytes and complete rule options remain identical at `Vault.process`, that verified pure cleanup result is reused instead of cleaning the same revision twice. Manual path exclusions are rechecked without relaxing the initial scope inside the callback, before filename planning, and after the final fresh read. Note-local controls and filename ownership are re-read before manual rename eligibility. Markdown success is reported even if a later rename fails.
 
 Bounded-work guards reject notes over 2,000,000 characters or 50,000 physical lines, individual lines over 32,000 characters, container nesting over 64 steps, more than 2,048 protected tokens on one line, more than 4,096 protected tokens across a note, frontmatter over 500,000 characters or 2,000 lines, and sortable frontmatter over 1,000 fields. These are deliberate UI-safety limits; blocked notes are unchanged and receive a reason.
 
@@ -177,6 +177,10 @@ npm run build
 
 Stable production-mode builds deploy byte-changed `main.js`, `manifest.json`, and `styles.css` only to the isolated test runtime `.obsidian/plugins/tps-linter`. They do not overwrite runtime-owned `data.json`. Direct production deployment is not part of this workflow.
 
+### 0.5.3 validation
+
+Validation covers strict current-file identity before and after every manual asynchronous boundary, identical same-path replacement, deletion, non-Markdown replacement, supported same-object rename, precise process rejection, 136 unit/property tests, 12 structural contracts, TypeScript, a separate final production-mode build, isolated runtime deployment, and reloaded test-vault inspection. Exact artifact hashes and reload evidence are recorded in `release-notes/0.5.3.md`.
+
 ### 0.5.2 validation
 
 Validation covers exact manual-preflight reuse, deterministic full-result equality, concurrent content/control/BOM/line-ending recomputation, the unconditional atomic process and exclusion order, 135 unit/property tests, 11 structural contracts, TypeScript, a separate final production-mode build, isolated runtime deployment, and reloaded test-vault inspection. On a deterministic 35,001-line dirty note, the released two-cleanup path measured 125.95 ms median and exact reuse measured 59.67 ms, a 52.6% reduction in Markdown-engine time with equivalent output. Exact artifact hashes and reload evidence are recorded in `release-notes/0.5.2.md`.
@@ -206,6 +210,12 @@ Validation covers safe YAML CST sorting and semantic verification, GCM property-
 Validation covers pure filename planning and collision/ownership guards, TPS filename preservation, exact line-ending and protected-block preservation, idempotence, settings normalization, command and settings contracts, TypeScript, the complete declared suite, a separate final production-mode build, runtime deployment, and a reloaded test-vault UI inspection. Exact final test counts, reload evidence, and artifact hashes are recorded in `release-notes/0.1.0.md`.
 
 ## Version history
+
+### 0.5.3
+
+- Keeps manual inspection, atomic content cleanup, and filename cleanup attached to the exact selected vault file object.
+- Rejects deletion, non-Markdown conversion, and a different note recreated at the same path across every asynchronous boundary.
+- Uses supported `Vault.getFileByPath`, `Vault.process`, and `FileManager.renameFile` behavior without retry, path handoff, adapter mutation, cache, or monkeypatch.
 
 ### 0.5.2
 
