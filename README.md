@@ -1,10 +1,10 @@
 # TPS Linter
 
-TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.5.3` keeps manual inspection, cleaning, and filename work attached to the exact selected note across asynchronous boundaries. Manual Check/Clean actions, note-local controls, protected Markdown, bounded-work guards, and ownership-safe filename cleanup remain available.
+TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.5.4` verifies reordered ordinary string-key frontmatter in linear rather than quadratic comparison work while preserving the released semantic snapshot and every complex-key compatibility path. Manual Check/Clean actions, note-local controls, protected Markdown, bounded-work guards, and ownership-safe filename cleanup remain available.
 
 ## Install with BRAT
 
-Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.5.3`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
+Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.5.4`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
 
 The released build is validated in the isolated Obsidian Plugin Test Vault. Publishing the release does not install it in the production vault; the production update remains a separate user-owned BRAT pull.
 
@@ -177,6 +177,10 @@ npm run build
 
 Stable production-mode builds deploy byte-changed `main.js`, `manifest.json`, and `styles.css` only to the isolated test runtime `.obsidian/plugins/tps-linter`. They do not overwrite runtime-owned `data.json`. Direct production deployment is not part of this workflow.
 
+### 0.5.4 validation
+
+Validation covers the linear string-key semantic verifier, the released right-side snapshot behavior, missing-versus-undefined keys, `NaN`, signed zero, boxed strings, nested structural keys, mixed-key Maps, a deterministic 25,000-case differential corpus against the frozen `0.5.3` comparator, the 1,000-field safety boundary, 139 unit/property tests, 12 structural contracts, TypeScript, a separate final production-mode build, isolated runtime deployment, and reloaded test-vault inspection. On the exact 1,000-field reverse-order fixture, end-to-end sorting improved from 33.62 ms to 24.43 ms median, a 27.3% reduction; already-sorted frontmatter still exits before semantic verification. Exact artifact hashes and reload evidence are recorded in `release-notes/0.5.4.md`.
+
 ### 0.5.3 validation
 
 Validation covers strict current-file identity before and after every manual asynchronous boundary, identical same-path replacement, deletion, non-Markdown replacement, supported same-object rename, precise process rejection, 136 unit/property tests, 12 structural contracts, TypeScript, a separate final production-mode build, isolated runtime deployment, and reloaded test-vault inspection. Exact artifact hashes and reload evidence are recorded in `release-notes/0.5.3.md`.
@@ -210,6 +214,12 @@ Validation covers safe YAML CST sorting and semantic verification, GCM property-
 Validation covers pure filename planning and collision/ownership guards, TPS filename preservation, exact line-ending and protected-block preservation, idempotence, settings normalization, command and settings contracts, TypeScript, the complete declared suite, a separate final production-mode build, runtime deployment, and a reloaded test-vault UI inspection. Exact final test counts, reload evidence, and artifact hashes are recorded in `release-notes/0.1.0.md`.
 
 ## Version history
+
+### 0.5.4
+
+- Replaces repeated linear searches and entry-array splices with exact string-key lookup for ordinary frontmatter semantic verification.
+- Retains one right-side snapshot and the complete structural comparator for complex or mixed nested YAML keys.
+- Preserves every command, setting, default, cleanup result, work limit, fail-closed guard, and plugin API without adding persistent state, fallback routing, monkeypatching, or unsupported Obsidian behavior.
 
 ### 0.5.3
 

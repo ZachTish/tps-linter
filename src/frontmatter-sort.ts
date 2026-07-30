@@ -401,7 +401,18 @@ function usesUnsafeYamlFeature(document: ParsedYamlDocument): boolean {
   return unsafe;
 }
 
-function semanticEquals(left: unknown, right: unknown): boolean {
+function hasOnlyStringKeys(
+  map: ReadonlyMap<unknown, unknown>,
+): boolean {
+  for (const key of map.keys()) {
+    if (typeof key !== "string") {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function semanticEquals(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) {
     return true;
   }
@@ -417,6 +428,20 @@ function semanticEquals(left: unknown, right: unknown): boolean {
   if (left instanceof Map && right instanceof Map) {
     if (left.size !== right.size) {
       return false;
+    }
+    if (hasOnlyStringKeys(left)) {
+      // Preserve the released comparator's right-side snapshot while using
+      // exact native string-key lookup instead of a quadratic entry search.
+      const rightSnapshot = new Map(right.entries());
+      for (const [leftKey, leftValue] of left.entries()) {
+        if (
+          !rightSnapshot.has(leftKey) ||
+          !semanticEquals(leftValue, rightSnapshot.get(leftKey))
+        ) {
+          return false;
+        }
+      }
+      return true;
     }
     const unmatched = [...right.entries()];
     for (const [leftKey, leftValue] of left.entries()) {
