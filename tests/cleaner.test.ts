@@ -1873,3 +1873,40 @@ test("empty and already-clean Markdown are no-ops and cleanup is idempotent", ()
   assert.equal(second.changed, false);
   assert.equal(second.output, first.output);
 });
+
+test("exact manual preflight reuse preserves results and recomputes every changed revision", () => {
+  for (const [sourceContent, concurrentRevision] of [
+    ["## heading\n \nBody", "## heading\n \nBodyx"],
+    ["\uFEFF### heading\r\n\t\r\nBody\r\n", "### heading\r\n\t\r\nBody\r\n"],
+    ["# Already clean\n\nBody\n", "# Already clean\r\n\r\nBody\r\n"],
+    [
+      "---\ntps-linter: false\n---\n## untouched",
+      "---\ntps-linter: true\n---\n## untouched",
+    ],
+  ]) {
+    let cleanupCalls = 0;
+    const countedClean = (content: string) => {
+      cleanupCalls += 1;
+      return cleanMarkdown(content, DEFAULT_MARKDOWN_OPTIONS);
+    };
+    const preflight = countedClean(sourceContent);
+    assert.deepEqual(
+      cleanMarkdown(sourceContent, DEFAULT_MARKDOWN_OPTIONS),
+      preflight,
+      "the pure cleanup result must be deterministic before it can be reused",
+    );
+    const cleanCurrentRevision = (currentContent: string) =>
+      currentContent === sourceContent
+        ? preflight
+        : countedClean(currentContent);
+
+    assert.equal(cleanCurrentRevision(sourceContent), preflight);
+    assert.equal(cleanupCalls, 1, "an unchanged revision must reuse the exact preflight object");
+
+    assert.deepEqual(
+      cleanCurrentRevision(concurrentRevision),
+      cleanMarkdown(concurrentRevision, DEFAULT_MARKDOWN_OPTIONS),
+    );
+    assert.equal(cleanupCalls, 2, "any byte change must run a fresh cleanup");
+  }
+});

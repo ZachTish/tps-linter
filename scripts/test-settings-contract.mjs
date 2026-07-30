@@ -23,7 +23,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.5.1",
+    version: "0.5.2",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
@@ -46,6 +46,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.4.0": "1.10.0",
     "0.5.0": "1.10.0",
     "0.5.1": "1.10.0",
+    "0.5.2": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -174,6 +175,16 @@ test("TPS Linter follows GCM frontmatter priority without invoking its mutator",
 });
 
 test("clean always takes a fresh preflight and enters the atomic process path", () => {
+  const inspectionInterfaceSource = sourceBetween(
+    mainSource,
+    "interface FileInspection {",
+    "interface CleanResult {",
+  );
+  const inspectFileSource = sourceBetween(
+    mainSource,
+    "  private async inspectFile(",
+    "  private async cleanFile(file: TFile): Promise<CleanResult> {",
+  );
   const cleanFileSource = sourceBetween(
     mainSource,
     "  private async cleanFile(file: TFile): Promise<CleanResult> {",
@@ -193,6 +204,16 @@ test("clean always takes a fresh preflight and enters the atomic process path", 
   assert.match(
     mainSource,
     /const content = readFresh\s*\?\s*await this\.app\.vault\.read\(liveFile\)\s*:\s*await this\.app\.vault\.cachedRead\(liveFile\)/,
+  );
+  assert.match(
+    inspectionInterfaceSource,
+    /sourceContent: string;/,
+    "the fresh inspection must retain the exact bytes that produced its cleanup result",
+  );
+  assert.match(
+    inspectFileSource,
+    /sourceContent: content,/,
+    "the retained preflight bytes must come from the same fresh read passed to cleanMarkdown",
   );
   assert.equal(
     (cleanFileSource.match(/this\.app\.vault\.process\(/g) ?? []).length,
@@ -216,7 +237,21 @@ test("clean always takes a fresh preflight and enters the atomic process path", 
     "the callback must retain both initial and newly-added exclusions",
   );
   assert.match(processSource, /return currentContent;/);
-  assert.match(processSource, /cleanMarkdown\(currentContent,\s*markdownOptions\)/);
+  assert.match(
+    processSource,
+    /currentMarkdown\s*=\s*currentContent === initialInspection\.sourceContent\s*\?\s*initialInspection\.markdown\s*:\s*cleanMarkdown\(currentContent,\s*markdownOptions\)/,
+    "only exact byte equality may reuse the verified manual-clean preflight",
+  );
+  assert.ok(
+    processSource.indexOf("if (exclusion.excluded)") <
+      processSource.indexOf("currentContent === initialInspection.sourceContent"),
+    "the live path exclusion must run before preflight reuse",
+  );
+  assert.doesNotMatch(
+    processSource,
+    /editorContentMatchesFile|normalizeLineEndings/,
+    "manual preflight reuse must not treat representation-only differences as equal",
+  );
   assert.match(allSource, /\.vault\.process\(/, "note cleanup must use Vault.process");
   assert.match(allSource, /\.fileManager\.renameFile\(/, "filename cleanup must use fileManager.renameFile");
 });

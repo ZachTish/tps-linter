@@ -58,6 +58,10 @@ interface FileInspection {
   markdown: MarkdownCleanupResult;
 }
 
+interface SourceFileInspection extends FileInspection {
+  sourceContent: string;
+}
+
 interface CleanResult {
   inspection: FileInspection;
   contentChanged: boolean;
@@ -464,7 +468,7 @@ export default class TPSLinterPlugin extends Plugin {
     markdownOptions = this.markdownOptions(),
     filenameOptions = this.filenameOptions(),
     filenameCleaningEnabled = this.settings.cleanFilenames,
-  ): Promise<FileInspection> {
+  ): Promise<SourceFileInspection> {
     const liveFile = this.app.vault.getFileByPath(file.path);
     if (!(liveFile instanceof TFile) || liveFile.extension !== "md") {
       throw new Error("The selected Markdown file is no longer available.");
@@ -488,6 +492,7 @@ export default class TPSLinterPlugin extends Plugin {
 
     return {
       file: liveFile,
+      sourceContent: content,
       filenamePlan,
       filenameDecision,
       lintControls,
@@ -521,7 +526,10 @@ export default class TPSLinterPlugin extends Plugin {
         return currentContent;
       }
 
-      currentMarkdown = cleanMarkdown(currentContent, markdownOptions);
+      currentMarkdown =
+        currentContent === initialInspection.sourceContent
+          ? initialInspection.markdown
+          : cleanMarkdown(currentContent, markdownOptions);
       contentChanged = currentMarkdown.changed;
       return currentMarkdown.output;
     });
