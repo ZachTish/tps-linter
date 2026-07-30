@@ -74,6 +74,11 @@ export function parseLintControls(markdown: string): LintControlResult {
     );
   }
 
+  const candidateTextPresent = CONTROL_KEY_TEXT.test(frontmatter.body);
+  if (!candidateTextPresent && !frontmatter.body.includes("\\")) {
+    return noControls();
+  }
+
   let document: ReturnType<typeof parseDocument> | null = null;
   try {
     document = parseDocument(frontmatter.body, {
@@ -85,7 +90,6 @@ export function parseLintControls(markdown: string): LintControlResult {
     return invalidControls("YAML could not be inspected safely");
   }
 
-  const candidateTextPresent = CONTROL_KEY_TEXT.test(frontmatter.body);
   const controlsPresent =
     isMap(document.contents) &&
     document.contents.items.some(

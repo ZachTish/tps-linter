@@ -1,10 +1,10 @@
 # TPS Linter
 
-TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.5.4` verifies reordered ordinary string-key frontmatter in linear rather than quadratic comparison work while preserving the released semantic snapshot and every complex-key compatibility path. Manual Check/Clean actions, note-local controls, protected Markdown, bounded-work guards, and ownership-safe filename cleanup remain available.
+TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.5.5` avoids loading the YAML parser for ordinary frontmatter that cannot contain a TPS Linter control while conservatively retaining the complete parser path for literal, quoted, and escaped control keys. Manual Check/Clean actions, note-local controls, protected Markdown, bounded-work guards, and ownership-safe filename cleanup remain available.
 
 ## Install with BRAT
 
-Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.5.4`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
+Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.5.5`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
 
 The released build is validated in the isolated Obsidian Plugin Test Vault. Publishing the release does not install it in the production vault; the production update remains a separate user-owned BRAT pull.
 
@@ -85,7 +85,7 @@ tps-linter-disabled-rules:
 ---
 ```
 
-The stable IDs are `filename`, `whitespace-only-lines`, `blank-lines`, `trailing-whitespace`, `trailing-blank-lines`, `final-newline`, `heading-capitalization`, `heading-levels`, `frontmatter-blank-line`, `frontmatter-sort`, and `all`. Values can be one scalar ID or a sequence. Keys must be exact, top-level keys. Structurally valid root block maps—including uniformly indented maps—flow maps, explicit scalar keys, quoted keys, and escaped quoted keys are recognized. Nested lookalikes remain ordinary note data. Unknown or duplicate IDs, duplicate/case-colliding keys, malformed control-like YAML, aliases, anchors, tags, merge keys, and unsupported YAML fail closed.
+The stable IDs are `filename`, `whitespace-only-lines`, `blank-lines`, `trailing-whitespace`, `trailing-blank-lines`, `final-newline`, `heading-capitalization`, `heading-levels`, `frontmatter-blank-line`, `frontmatter-sort`, and `all`. Values can be one scalar ID or a sequence. Keys must be exact, top-level keys. Structurally valid root block maps—including uniformly indented maps—flow maps, explicit scalar keys, quoted keys, and escaped quoted keys are recognized. Nested lookalikes remain ordinary note data. Unknown or duplicate IDs, duplicate/case-colliding keys, malformed control-like YAML, aliases, anchors, tags, merge keys, and unsupported YAML fail closed. After the unchanged character and line safety limits, frontmatter with neither a literal control-key candidate nor a backslash returns without loading the YAML parser. A backslash always retains full parsing so escaped control keys remain discoverable; candidate controls still follow every existing structural and fail-closed validation rule.
 
 Exact body ranges can be protected with standalone markers:
 
@@ -177,6 +177,10 @@ npm run build
 
 Stable production-mode builds deploy byte-changed `main.js`, `manifest.json`, and `styles.css` only to the isolated test runtime `.obsidian/plugins/tps-linter`. They do not overwrite runtime-owned `data.json`. Direct production deployment is not part of this workflow.
 
+### 0.5.5 validation
+
+Validation covers the conservative no-candidate fast path, ordinary and malformed unrelated frontmatter, literal and escaped control keys, unchanged character/line limits, a deterministic 25,007-case differential corpus against the released parser, 140 unit/property tests, 12 structural contracts, TypeScript, a separate final production-mode build, isolated runtime deployment, and reloaded test-vault inspection. On the identical 1,000-field no-control fixture, the exact `0.5.4` parser measured 5.499 ms median and `0.5.5` measured 0.059 ms median across 300 calls after warmup, a 98.9% reduction at this seam. Exact artifact hashes and reload evidence are recorded in `release-notes/0.5.5.md`.
+
 ### 0.5.4 validation
 
 Validation covers the linear string-key semantic verifier, the released right-side snapshot behavior, missing-versus-undefined keys, `NaN`, signed zero, boxed strings, nested structural keys, mixed-key Maps, a deterministic 25,000-case differential corpus against the frozen `0.5.3` comparator, the 1,000-field safety boundary, 139 unit/property tests, 12 structural contracts, TypeScript, a separate final production-mode build, isolated runtime deployment, and reloaded test-vault inspection. On the exact 1,000-field reverse-order fixture, end-to-end sorting improved from 33.62 ms to 24.43 ms median, a 27.3% reduction; already-sorted frontmatter still exits before semantic verification. Exact artifact hashes and reload evidence are recorded in `release-notes/0.5.4.md`.
@@ -214,6 +218,12 @@ Validation covers safe YAML CST sorting and semantic verification, GCM property-
 Validation covers pure filename planning and collision/ownership guards, TPS filename preservation, exact line-ending and protected-block preservation, idempotence, settings normalization, command and settings contracts, TypeScript, the complete declared suite, a separate final production-mode build, runtime deployment, and a reloaded test-vault UI inspection. Exact final test counts, reload evidence, and artifact hashes are recorded in `release-notes/0.1.0.md`.
 
 ## Version history
+
+### 0.5.5
+
+- Skips YAML control parsing when bounded frontmatter contains neither a literal TPS Linter control-key candidate nor any escape backslash.
+- Retains the full parser for all candidate and escaped-key cases, preserving every note-local control, malformed-control fail-closed guard, size limit, command, setting, default, and cleanup result.
+- Adds no persistent cache, fallback route, retry, monkeypatch, polling, or unsupported Obsidian behavior.
 
 ### 0.5.4
 

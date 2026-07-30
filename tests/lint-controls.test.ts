@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -186,6 +187,47 @@ test("malformed unrelated YAML does not disable linting", () => {
     assert.deepEqual([...result.disabledRules], [], input);
     assert.equal(result.reason, null, input);
   }
+});
+
+test("ordinary frontmatter exits before YAML parsing while encoded keys stay conservative", () => {
+  for (const input of [
+    "---\ntitle: Test\naliases: [Example]\n---\nBody\n",
+    "---\nvalue: [unterminated\n---\n",
+    "---\npath: \"C:\\\\notes\"\n---\n",
+  ]) {
+    assert.deepEqual(parseLintControls(input), {
+      controlsPresent: false,
+      disabledAll: false,
+      disabledRules: new Set(),
+      reason: null,
+    });
+  }
+
+  const encodedControl = parseLintControls(
+    "---\n\"\\u0074ps-linter\": false\n---\n",
+  );
+  assert.equal(encodedControl.controlsPresent, true);
+  assert.equal(encodedControl.disabledAll, true);
+
+  const source = readFileSync(
+    new URL("../src/lint-controls.ts", import.meta.url),
+    "utf8",
+  );
+  const candidateCheck = source.indexOf(
+    "const candidateTextPresent = CONTROL_KEY_TEXT.test(frontmatter.body);",
+  );
+  const conservativeFastExit = source.indexOf(
+    '!candidateTextPresent && !frontmatter.body.includes("\\\\")',
+  );
+  const yamlParse = source.indexOf(
+    "document = parseDocument(frontmatter.body",
+  );
+
+  assert.notEqual(candidateCheck, -1);
+  assert.notEqual(conservativeFastExit, -1);
+  assert.notEqual(yamlParse, -1);
+  assert.ok(candidateCheck < yamlParse);
+  assert.ok(conservativeFastExit < yamlParse);
 });
 
 test("parser is read-only and supports BOM, CRLF, and document-end delimiters", () => {
