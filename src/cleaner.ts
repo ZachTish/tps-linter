@@ -6,6 +6,7 @@ import type { FilenameOwnershipStatus } from "./gcm-compat.ts";
 import {
   TPS_LINTER_RULE_IDS,
   parseLintControls,
+  type LintControlResult,
   type TPSLinterRuleId,
 } from "./lint-controls.ts";
 import type {
@@ -84,6 +85,11 @@ export interface MarkdownCleanupResult {
   disabledRules: TPSLinterRuleId[];
   noteDisabledReason: string | null;
   safetyBlockedReason: string | null;
+}
+
+export interface MarkdownCleanupAnalysis {
+  lintControls: LintControlResult;
+  markdown: MarkdownCleanupResult;
 }
 
 export interface PathExclusion {
@@ -456,16 +462,47 @@ export function inspectPathExclusion(
   return { excluded: false, reason: null };
 }
 
+export function analyzeMarkdownCleanup(
+  input: string,
+  options: MarkdownCleanupOptions,
+): MarkdownCleanupAnalysis {
+  const inputSafetyBlock = inspectMarkdownInputSafety(input);
+  if (inputSafetyBlock) {
+    return {
+      lintControls: {
+        controlsPresent: false,
+        disabledAll: true,
+        disabledRules: new Set(),
+        reason: `Safety blocked: ${inputSafetyBlock}.`,
+      },
+      markdown: unchangedMarkdownResult(
+        input,
+        [],
+        null,
+        inputSafetyBlock,
+      ),
+    };
+  }
+
+  const controls = parseLintControls(input);
+  return {
+    lintControls: controls,
+    markdown: cleanMarkdownWithControls(input, options, controls),
+  };
+}
+
 export function cleanMarkdown(
   input: string,
   options: MarkdownCleanupOptions,
 ): MarkdownCleanupResult {
-  const inputSafetyBlock = inspectMarkdownInputSafety(input);
-  if (inputSafetyBlock) {
-    return unchangedMarkdownResult(input, [], null, inputSafetyBlock);
-  }
+  return analyzeMarkdownCleanup(input, options).markdown;
+}
 
-  const controls = parseLintControls(input);
+function cleanMarkdownWithControls(
+  input: string,
+  options: MarkdownCleanupOptions,
+  controls: LintControlResult,
+): MarkdownCleanupResult {
   if (controls.disabledAll) {
     return unchangedMarkdownResult(
       input,

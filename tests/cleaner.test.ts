@@ -2,13 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  analyzeMarkdownCleanup,
   cleanMarkdown,
   decideFilenameRename,
+  inspectMarkdownInputSafety,
   inspectPathExclusion,
   MARKDOWN_SAFETY_LIMITS,
   planMarkdownFilename,
   type FilenamePlan,
 } from "../src/cleaner.ts";
+import { parseLintControls } from "../src/lint-controls.ts";
 
 const DEFAULT_FILENAME_OPTIONS = {
   unsafeCharacterStyle: "space" as const,
@@ -1593,6 +1596,56 @@ test("note-local controls disable all or selected rules before cleanup", () => {
     "frontmatter-sort",
   ]);
   assert.equal(selected.noteDisabledReason, null);
+});
+
+test("combined Markdown analysis preserves cleanup and filename control decisions", () => {
+  const inputs = [
+    "# Already clean\n\nBody\n",
+    "## lower heading\n \nBody",
+    [
+      "---\n",
+      "tps-linter-disabled-rules: filename\n",
+      "status: active\n",
+      "---\n",
+      "## lower heading",
+    ].join(""),
+    "---\ntps-linter: false\n---\n## untouched",
+    "---\ntps-linter-disabled-rules: unknown\n---\n## blocked",
+    "x".repeat(MARKDOWN_SAFETY_LIMITS.maxLineCharacters + 1),
+  ];
+
+  for (const input of inputs) {
+    const safetyBlockedReason = inspectMarkdownInputSafety(input);
+    const separateLintControls = safetyBlockedReason
+      ? {
+          controlsPresent: false,
+          disabledAll: true,
+          disabledRules: new Set(),
+          reason: `Safety blocked: ${safetyBlockedReason}.`,
+        }
+      : parseLintControls(input);
+    const publicMarkdown = cleanMarkdown(
+      input,
+      DEFAULT_MARKDOWN_OPTIONS,
+    );
+    const combined = analyzeMarkdownCleanup(
+      input,
+      DEFAULT_MARKDOWN_OPTIONS,
+    );
+
+    assert.deepEqual(combined.lintControls, separateLintControls, input);
+    assert.deepEqual(combined.markdown, publicMarkdown, input);
+  }
+
+  const filenameDisabled = analyzeMarkdownCleanup(
+    "---\ntps-linter-disabled-rules: filename\n---\n# Clean\n",
+    DEFAULT_MARKDOWN_OPTIONS,
+  );
+  assert.equal(
+    filenameDisabled.lintControls.disabledRules.has("filename"),
+    true,
+  );
+  assert.deepEqual(filenameDisabled.markdown.disabledRules, []);
 });
 
 test("indented top-level note controls cannot be bypassed", () => {

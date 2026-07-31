@@ -9,6 +9,7 @@ import {
 } from "obsidian";
 
 import {
+  analyzeMarkdownCleanup,
   cleanMarkdown,
   decideFilenameRename,
   inspectMarkdownInputSafety,
@@ -481,10 +482,8 @@ export default class TPSLinterPlugin extends Plugin {
     if (!isCurrentMarkdownFile(this.app.vault, liveFile)) {
       throw new Error("The selected Markdown file is no longer available.");
     }
-    const contentSafetyBlock = inspectMarkdownInputSafety(content);
-    const lintControls = contentSafetyBlock
-      ? safetyBlockedLintControls(contentSafetyBlock)
-      : parseLintControls(content);
+    const analysis = analyzeMarkdownCleanup(content, markdownOptions);
+    const lintControls = analysis.lintControls;
     const filenamePlan = this.createFilenamePlan(liveFile, filenameOptions);
     const filenameDecision = this.createFilenameDecision(
       filenamePlan,
@@ -492,7 +491,7 @@ export default class TPSLinterPlugin extends Plugin {
       lintControls,
       filenameCleaningEnabled,
     );
-    const markdown = cleanMarkdown(content, markdownOptions);
+    const markdown = analysis.markdown;
 
     return {
       file: liveFile,

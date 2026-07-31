@@ -24,7 +24,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.5.5",
+    version: "0.5.6",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
@@ -51,6 +51,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.5.3": "1.10.0",
     "0.5.4": "1.10.0",
     "0.5.5": "1.10.0",
+    "0.5.6": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -258,6 +259,39 @@ test("clean always takes a fresh preflight and enters the atomic process path", 
   );
   assert.match(allSource, /\.vault\.process\(/, "note cleanup must use Vault.process");
   assert.match(allSource, /\.fileManager\.renameFile\(/, "filename cleanup must use fileManager.renameFile");
+});
+
+test("manual inspection shares one safety and control analysis with cleanup", () => {
+  const inspectFileSource = sourceBetween(
+    mainSource,
+    "  private async inspectFile(",
+    "  private async cleanFile(file: TFile): Promise<CleanResult> {",
+  );
+  const combinedAnalysisSource = sourceBetween(
+    cleanerSource,
+    "export function analyzeMarkdownCleanup(",
+    "export function cleanMarkdown(",
+  );
+
+  assert.equal(
+    (inspectFileSource.match(/analyzeMarkdownCleanup\(/g) ?? []).length,
+    1,
+    "manual inspection should request one combined analysis",
+  );
+  assert.doesNotMatch(
+    inspectFileSource,
+    /inspectMarkdownInputSafety\(|parseLintControls\(|cleanMarkdown\(/,
+    "manual inspection must not repeat work already owned by the combined analysis",
+  );
+  assert.equal(
+    (combinedAnalysisSource.match(/inspectMarkdownInputSafety\(/g) ?? [])
+      .length,
+    1,
+  );
+  assert.equal(
+    (combinedAnalysisSource.match(/parseLintControls\(/g) ?? []).length,
+    1,
+  );
 });
 
 test("manual inspection and clean never hand work to a same-path replacement", () => {
