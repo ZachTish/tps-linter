@@ -407,13 +407,15 @@ export function decideFilenameRename(
   }
 
   const sourcePath = normalizeVaultPath(plan.sourcePath);
-  const targetPathKey = collisionPathKey(plan.targetPath);
-  const collision = siblingPaths
-    .map(normalizeVaultPath)
-    .find(
-      (path) =>
-        path !== sourcePath && collisionPathKey(path) === targetPathKey,
-    );
+  const targetPathKey = collisionKey(normalizeVaultPath(plan.targetPath));
+  let collision: string | undefined;
+  for (const siblingPath of siblingPaths) {
+    const path = normalizeVaultPath(siblingPath);
+    if (path !== sourcePath && collisionKey(path) === targetPathKey) {
+      collision = path;
+      break;
+    }
+  }
   if (collision) {
     return {
       allowed: false,
@@ -1350,8 +1352,8 @@ function normalizeVaultPath(value: string): string {
     .replace(/\/$/, "");
 }
 
-function collisionPathKey(value: string): string {
-  return normalizeVaultPath(value).normalize("NFC").toLowerCase();
+function collisionKey(value: string): string {
+  return value.normalize("NFC").toLowerCase();
 }
 
 function unique(values: readonly string[]): string[] {

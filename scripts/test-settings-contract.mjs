@@ -24,7 +24,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.5.7",
+    version: "0.5.8",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
@@ -53,6 +53,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.5.5": "1.10.0",
     "0.5.6": "1.10.0",
     "0.5.7": "1.10.0",
+    "0.5.8": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -430,6 +431,27 @@ test("filename collision checks stay sibling-local and never scan the vault", ()
   assert.match(decisionSource, /\.map\(\(child\) => child\.path\)/);
   assert.doesNotMatch(allSource, /\.vault\.getMarkdownFiles\(\)/);
   assert.doesNotMatch(allSource, /\.vault\.getFiles\(\)/);
+});
+
+test("filename collision decisions normalize each sibling in one ordered pass", () => {
+  const decisionSource = sourceBetween(
+    cleanerSource,
+    "export function decideFilenameRename(",
+    "export function inspectPathExclusion(",
+  );
+
+  assert.match(
+    decisionSource,
+    /for \(const siblingPath of siblingPaths\)/,
+  );
+  assert.equal(
+    (decisionSource.match(/normalizeVaultPath\(siblingPath\)/g) ?? [])
+      .length,
+    1,
+  );
+  assert.doesNotMatch(decisionSource, /\.map\(normalizeVaultPath\)/);
+  assert.match(decisionSource, /collisionKey\(path\) === targetPathKey/);
+  assert.match(decisionSource, /collision = path;\s*break;/);
 });
 
 test("rename failures remain partial results with explicit reporting and warning logs", () => {

@@ -240,6 +240,71 @@ test("rename decisions block GCM ownership, collisions, and case-only changes", 
   );
 });
 
+test("rename collision decisions preserve normalized sibling order", () => {
+  const eligible = planMarkdownFilename(
+    "Inbox/Needs   Space.md",
+    DEFAULT_FILENAME_OPTIONS,
+  );
+  const ordinarySiblings = Array.from(
+    { length: 1_000 },
+    (_, index) => `Inbox/Other ${index}.md`,
+  );
+
+  assert.deepEqual(
+    decideFilenameRename(
+      eligible,
+      [
+        "/Inbox//Needs   Space.md/",
+        ...ordinarySiblings,
+      ],
+      "gcm-absent",
+      true,
+    ),
+    {
+      allowed: true,
+      reason: "eligible",
+      detail: null,
+    },
+  );
+
+  assert.deepEqual(
+    decideFilenameRename(
+      eligible,
+      [
+        eligible.sourcePath,
+        "/Inbox//Needs Space.md/",
+        ...ordinarySiblings,
+        "INBOX/NEEDS SPACE.MD",
+      ],
+      "gcm-absent",
+      true,
+    ),
+    {
+      allowed: false,
+      reason: "target-collision",
+      detail: "Inbox/Needs Space.md",
+    },
+  );
+
+  assert.deepEqual(
+    decideFilenameRename(
+      eligible,
+      [
+        eligible.sourcePath,
+        ...ordinarySiblings,
+        "inbox/needs space.md",
+      ],
+      "gcm-absent",
+      true,
+    ),
+    {
+      allowed: false,
+      reason: "target-collision",
+      detail: "inbox/needs space.md",
+    },
+  );
+});
+
 test("filename planning is idempotent", () => {
   const first = planMarkdownFilename(
     "Inbox/  A:B   C... .md",

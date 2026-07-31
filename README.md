@@ -1,10 +1,10 @@
 # TPS Linter
 
-TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.5.7` avoids normalizing two already ordinary LF buffers when an unequal editor/file comparison can be decided directly. Every released command, setting, rule, fail-closed guard, protected-Markdown contract, and ownership-safe filename behavior remains available.
+TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.5.8` checks sibling filename collisions in one ordered pass, normalizing each sibling path once and stopping at the first collision. Every released command, setting, rule, fail-closed guard, protected-Markdown contract, and ownership-safe filename behavior remains available.
 
 ## Install with BRAT
 
-Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.5.7`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
+Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.5.8`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
 
 The released build is validated in the isolated Obsidian Plugin Test Vault. Publishing the release does not install it in the production vault; the production update remains a separate user-owned BRAT pull.
 
@@ -178,6 +178,12 @@ npm run build
 
 Stable production-mode builds deploy byte-changed `main.js`, `manifest.json`, and `styles.css` only to the isolated test runtime `.obsidian/plugins/tps-linter`. They do not overwrite runtime-owned `data.json`. Direct production deployment is not part of this workflow.
 
+### 0.5.8 validation
+
+Build-only validation pins exact public `0.5.7` at commit `0f76f1eb962ed1562a299f2d2946831a4ccceced` and source hash `37ecb00b13cec6d2f76adfb1dcd6908a7d6be06625497a99694cd01a1b15833f`. The untouched release passed 142 unit/property tests, 13 structural contracts, TypeScript, and two production-mode builds with runtime deployment suppressed; its generated artifacts matched the public release byte-for-byte. The candidate adds focused first/late/no-collision coverage and a structural one-pass contract. Exact released and candidate filename-decision functions produced zero mismatches across 1,000,000 seeded cases, and the complete `TPSLinterPlugin.createFilenameDecision` path produced zero mismatches across another 100,000 seeded cases.
+
+Across 31 interleaved rounds on 100,000 sibling files, the complete plugin-class path improved from 54.961 ms to 28.430 ms median with no collision (48.3%), from 27.320 ms to 2.155 ms with a collision at index 1 (92.1%), and from 53.948 ms to 28.290 ms with a collision at index 99,998 (47.6%). At the pure decision boundary, the early-collision candidate read 2 sibling-path entries where exact `0.5.7` read all 100,000; the complete class still enumerates the parent once to select sibling files. Final versioned validation passes 143 unit/property tests, 14 structural contracts, TypeScript, the required separate production-mode build, isolated runtime deployment, reload, and read-only command registration inspection. The bundle grows by 24 bytes; exact artifact hashes and test-vault evidence are recorded in `release-notes/0.5.8.md`.
+
 ### 0.5.7 validation
 
 Validation covers the exact editor/file comparison contract across 100,000 generated pairs plus an independent 8,225,424-pair exhaustive and 300,000-pair randomized adversarial corpus, BOM plus LF/CRLF/CR representation equivalence, ordinary unequal LF buffers, scheduler and lifecycle behavior, 142 unit/property tests, 13 structural contracts, TypeScript, a separate final production-mode build, isolated runtime deployment, and before/after test-vault inspection. On two unequal 1,500,001-character LF buffers, 20 actual released comparisons measured 21.842 ms median and the candidate measured 2.575 ms, an 88.2% reduction at this guard seam. A representation-equivalent 1,000,001-character LF/BOM+CRLF pair remained within ordinary run variance at 255.237 ms versus 253.517 ms across ten comparisons. Exact artifact hashes and reload evidence are recorded in `release-notes/0.5.7.md`.
@@ -227,6 +233,13 @@ Validation covers safe YAML CST sorting and semantic verification, GCM property-
 Validation covers pure filename planning and collision/ownership guards, TPS filename preservation, exact line-ending and protected-block preservation, idempotence, settings normalization, command and settings contracts, TypeScript, the complete declared suite, a separate final production-mode build, runtime deployment, and a reloaded test-vault UI inspection. Exact final test counts, reload evidence, and artifact hashes are recorded in `release-notes/0.1.0.md`.
 
 ## Version history
+
+### 0.5.8
+
+- Checks case-insensitive, Unicode-normalized sibling filename collisions in one ordered pass.
+- Normalizes each sibling path once and stops as soon as the first released-order collision is found.
+- Preserves sibling-only scope, source-file exclusion, first-collision detail, GCM ownership, commands, settings, rules, and every fail-closed decision.
+- Adds no state, cache, retry, fallback route, monkeypatch, polling, or unsupported Obsidian behavior.
 
 ### 0.5.7
 
