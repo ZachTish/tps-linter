@@ -1,10 +1,10 @@
 # TPS Linter
 
-TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.5.6` shares the initial Markdown safety and note-control analysis used by each manual Check/Clean inspection instead of repeating it before cleanup. Every released command, setting, rule, fail-closed guard, protected-Markdown contract, and ownership-safe filename behavior remains available.
+TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.5.7` avoids normalizing two already ordinary LF buffers when an unequal editor/file comparison can be decided directly. Every released command, setting, rule, fail-closed guard, protected-Markdown contract, and ownership-safe filename behavior remains available.
 
 ## Install with BRAT
 
-Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.5.6`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
+Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.5.7`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
 
 The released build is validated in the isolated Obsidian Plugin Test Vault. Publishing the release does not install it in the production vault; the production update remains a separate user-owned BRAT pull.
 
@@ -178,6 +178,10 @@ npm run build
 
 Stable production-mode builds deploy byte-changed `main.js`, `manifest.json`, and `styles.css` only to the isolated test runtime `.obsidian/plugins/tps-linter`. They do not overwrite runtime-owned `data.json`. Direct production deployment is not part of this workflow.
 
+### 0.5.7 validation
+
+Validation covers the exact editor/file comparison contract across 100,000 generated pairs plus an independent 8,225,424-pair exhaustive and 300,000-pair randomized adversarial corpus, BOM plus LF/CRLF/CR representation equivalence, ordinary unequal LF buffers, scheduler and lifecycle behavior, 142 unit/property tests, 13 structural contracts, TypeScript, a separate final production-mode build, isolated runtime deployment, and before/after test-vault inspection. On two unequal 1,500,001-character LF buffers, 20 actual released comparisons measured 21.842 ms median and the candidate measured 2.575 ms, an 88.2% reduction at this guard seam. A representation-equivalent 1,000,001-character LF/BOM+CRLF pair remained within ordinary run variance at 255.237 ms versus 253.517 ms across ten comparisons. Exact artifact hashes and reload evidence are recorded in `release-notes/0.5.7.md`.
+
 ### 0.5.6 validation
 
 Validation covers one shared initial manual-analysis result, unchanged public cleanup output, fresh concurrent-revision cleanup, independent post-output note-control and idempotence verification, final live filename-control rechecks, unchanged safety limits, exact released-source hash pins, a deterministic 10,003-case differential corpus against `0.5.5`, 141 unit/property tests, 13 structural contracts, TypeScript, a separate final production-mode build, isolated runtime deployment, and reloaded test-vault inspection. The deterministic manual seam drops from two initial safety/control analyses to one. Synthetic pure-function medians improved 7.6% on a 1,128,890-byte ordinary note, 9.8% on the equivalent control-bearing note, and 50.2% on a 17,031-byte note disabled by one of 1,000 frontmatter fields; these figures are not whole-Obsidian or save-lint speedups. Exact artifact hashes and reload evidence are recorded in `release-notes/0.5.6.md`.
@@ -223,6 +227,12 @@ Validation covers safe YAML CST sorting and semantic verification, GCM property-
 Validation covers pure filename planning and collision/ownership guards, TPS filename preservation, exact line-ending and protected-block preservation, idempotence, settings normalization, command and settings contracts, TypeScript, the complete declared suite, a separate final production-mode build, runtime deployment, and a reloaded test-vault UI inspection. Exact final test counts, reload evidence, and artifact hashes are recorded in `release-notes/0.1.0.md`.
 
 ## Version history
+
+### 0.5.7
+
+- Unequal editor/file buffers that contain neither a leading BOM nor carriage returns now compare directly instead of normalizing both complete strings.
+- Representation-only BOM and LF/CRLF/CR equivalence, active-note save guards, commands, settings, rules, and mutation behavior remain unchanged.
+- Adds one small pure eligibility helper and no state, cache, retry, fallback route, monkeypatch, polling, or unsupported Obsidian behavior.
 
 ### 0.5.6
 

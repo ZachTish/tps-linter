@@ -5,6 +5,7 @@ import {
   SaveLintLifecycle,
   SaveLintScheduler,
   editorContentMatchesFile,
+  editorContentNeedsNormalization,
 } from "../src/save-lint-scheduler.ts";
 
 function deferred(): {
@@ -54,6 +55,14 @@ test("editor/file comparison tolerates representation-only BOM and line-ending d
     editorContentMatchesFile("Body changed\n", "Body\n"),
     false,
   );
+});
+
+test("plain LF editor buffers do not enter representation normalization", () => {
+  assert.equal(editorContentNeedsNormalization("Body\n"), false);
+  assert.equal(editorContentNeedsNormalization("Body changed\n"), false);
+  assert.equal(editorContentNeedsNormalization("\uFEFFBody\n"), true);
+  assert.equal(editorContentNeedsNormalization("Body\r\n"), true);
+  assert.equal(editorContentNeedsNormalization("Body\r"), true);
 });
 
 test("editor/file comparison exactly matches the former normalization semantics", () => {

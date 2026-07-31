@@ -42,8 +42,23 @@ export function editorContentMatchesFile(
     return true;
   }
 
-  return normalizeEditorComparison(editorContent) ===
-    normalizeEditorComparison(fileContent);
+  const editorNeedsNormalization =
+    editorContentNeedsNormalization(editorContent);
+  const fileNeedsNormalization =
+    editorContentNeedsNormalization(fileContent);
+  if (!editorNeedsNormalization && !fileNeedsNormalization) {
+    return false;
+  }
+
+  return (editorNeedsNormalization
+    ? normalizeEditorComparison(editorContent)
+    : editorContent) === (fileNeedsNormalization
+    ? normalizeEditorComparison(fileContent)
+    : fileContent);
+}
+
+export function editorContentNeedsNormalization(content: string): boolean {
+  return content.charCodeAt(0) === 0xfeff || content.includes("\r");
 }
 
 /**
