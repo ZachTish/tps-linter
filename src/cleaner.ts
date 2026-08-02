@@ -56,6 +56,7 @@ export interface MarkdownCleanupOptions {
   trimNonblankTrailingWhitespace: boolean;
   removeTrailingBlankLines: boolean;
   ensureFinalNewline: boolean;
+  ensureBlankLineAtBeginning: boolean;
   headingCapitalizationStyle: HeadingCapitalizationStyle;
   normalizeHeadingLevels: boolean;
   pushHeadingHierarchyToH6: boolean;
@@ -73,6 +74,7 @@ export interface MarkdownCleanupChanges {
   headingsCapitalized: number;
   headingLevelsAdjusted: number;
   frontmatterFieldsReordered: number;
+  leadingBlankLineAdded: boolean;
   frontmatterBlankLineAdded: boolean;
   frontmatterSortSkippedReason: string | null;
   finalNewlineAdded: boolean;
@@ -577,6 +579,7 @@ function cleanMarkdownOnce(
     headingsCapitalized: 0,
     headingLevelsAdjusted: 0,
     frontmatterFieldsReordered: 0,
+    leadingBlankLineAdded: false,
     frontmatterBlankLineAdded: false,
     frontmatterSortSkippedReason: null,
     finalNewlineAdded: false,
@@ -600,6 +603,12 @@ function cleanMarkdownOnce(
     );
     workingInput = spacing.output;
     changes.frontmatterBlankLineAdded = spacing.added;
+  }
+
+  if (options.ensureBlankLineAtBeginning) {
+    const spacing = addBlankLineAtBeginning(workingInput);
+    workingInput = spacing.output;
+    changes.leadingBlankLineAdded = spacing.added;
   }
 
   const tokens = splitLinesPreservingEndings(workingInput);
@@ -803,8 +812,17 @@ function cleanMarkdownOnce(
       continue;
     }
 
-    if (options.cleanWhitespaceOnlyLines && /^[ \t]+$/.test(token.body)) {
-      token.body = "";
+    const whitespaceComparisonBody =
+      index === 0 && options.ensureBlankLineAtBeginning
+        ? comparisonBody
+        : token.body;
+    if (
+      options.cleanWhitespaceOnlyLines &&
+      /^[ \t]+$/.test(whitespaceComparisonBody)
+    ) {
+      token.body = index === 0 && token.body.startsWith("\uFEFF")
+        ? "\uFEFF"
+        : "";
       changes.whitespaceOnlyLinesCleaned += 1;
     } else if (
       options.trimNonblankTrailingWhitespace &&
@@ -844,8 +862,13 @@ function cleanMarkdownOnce(
 
   const retainedTokens: ProcessedLineToken[] = [];
   let previousWasCollapsibleBlank = false;
-  for (const token of processedTokens) {
-    const blank = /^[ \t]*$/.test(token.body);
+  for (let index = 0; index < processedTokens.length; index += 1) {
+    const token = processedTokens[index];
+    if (!token) continue;
+    const blankBody = index === 0 && options.ensureBlankLineAtBeginning
+      ? token.body.replace(/^\uFEFF/, "")
+      : token.body;
+    const blank = /^[ \t]*$/.test(blankBody);
     const collapsibleBlank = blank && !token.protected;
     if (
       options.collapseConsecutiveBlankLines &&
@@ -887,6 +910,15 @@ function cleanMarkdownOnce(
   const output = retainedTokens
     .map((token) => `${token.body}${token.ending}`)
     .join("");
+  const outputSafetyBlock = inspectMarkdownInputSafety(output);
+  if (outputSafetyBlock) {
+    return unchangedMarkdownResult(
+      input,
+      disabledRules,
+      null,
+      `cleanup output would exceed a safety limit: ${outputSafetyBlock}`,
+    );
+  }
   return {
     output,
     changed: output !== input,
@@ -917,6 +949,9 @@ function applyDisabledRules(
       !disabledRules.has("trailing-blank-lines"),
     ensureFinalNewline:
       options.ensureFinalNewline && !disabledRules.has("final-newline"),
+    ensureBlankLineAtBeginning:
+      options.ensureBlankLineAtBeginning &&
+      !disabledRules.has("leading-blank-line"),
     headingCapitalizationStyle: disabledRules.has("heading-capitalization")
       ? "off"
       : options.headingCapitalizationStyle,
@@ -958,6 +993,7 @@ function unchangedMarkdownResult(
       headingsCapitalized: 0,
       headingLevelsAdjusted: 0,
       frontmatterFieldsReordered: 0,
+      leadingBlankLineAdded: false,
       frontmatterBlankLineAdded: false,
       frontmatterSortSkippedReason: null,
       finalNewlineAdded: false,
@@ -1046,6 +1082,32 @@ interface DocumentFrontmatterSortResult {
 interface FrontmatterSpacingResult {
   output: string;
   added: boolean;
+}
+
+function addBlankLineAtBeginning(input: string): FrontmatterSpacingResult {
+  if (!input) return { output: input, added: false };
+
+  const hasBom = input.startsWith("\uFEFF");
+  const content = hasBom ? input.slice(1) : input;
+  if (!content) return { output: input, added: false };
+
+  const tokens = splitLinesPreservingEndings(content);
+  const first = tokens[0];
+  if (
+    !first ||
+    /^[ \t]*$/.test(first.body) ||
+    /^---[ \t]*$/.test(first.body)
+  ) {
+    return { output: input, added: false };
+  }
+
+  const lineEnding = preferredLineEnding(tokens);
+  return {
+    output: hasBom
+      ? `\uFEFF${lineEnding}${content}`
+      : `${lineEnding}${content}`,
+    added: true,
+  };
 }
 
 function addBlankLineAfterFrontmatter(

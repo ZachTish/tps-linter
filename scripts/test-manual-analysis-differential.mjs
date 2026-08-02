@@ -66,6 +66,7 @@ const baseOptions = {
   trimNonblankTrailingWhitespace: false,
   removeTrailingBlankLines: false,
   ensureFinalNewline: true,
+  ensureBlankLineAtBeginning: false,
   headingCapitalizationStyle: "first-letter",
   normalizeHeadingLevels: true,
   pushHeadingHierarchyToH6: false,
@@ -189,16 +190,29 @@ function compareCase(input, options, label) {
     `${label}: lint controls`,
   );
   assert.deepEqual(
-    candidate.markdown,
+    withoutLeadingBlankLineChange(candidate.markdown),
     releasedMarkdown,
     `${label}: combined Markdown`,
   );
   assert.deepEqual(
-    candidateCleaner.cleanMarkdown(input, options),
+    withoutLeadingBlankLineChange(
+      candidateCleaner.cleanMarkdown(input, options),
+    ),
     releasedMarkdown,
     `${label}: public cleanMarkdown`,
   );
   caseCount += 1;
+}
+
+function withoutLeadingBlankLineChange(result) {
+  assert.equal(
+    result.changes.leadingBlankLineAdded,
+    false,
+    "historical differential options must keep leading spacing disabled",
+  );
+  const { leadingBlankLineAdded: _leadingBlankLineAdded, ...changes } =
+    result.changes;
+  return { ...result, changes };
 }
 
 function nextRandom() {

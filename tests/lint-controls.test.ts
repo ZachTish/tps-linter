@@ -29,6 +29,7 @@ test("exports stable namespaced control keys and rule IDs", () => {
     "trailing-whitespace",
     "trailing-blank-lines",
     "final-newline",
+    "leading-blank-line",
     "heading-capitalization",
     "heading-levels",
     "frontmatter-blank-line",
@@ -81,6 +82,7 @@ test("disabled rules accept one stable scalar ID or a sequence", () => {
       "---\n",
       "tps-linter-disabled-rules:\n",
       "  - blank-lines\n",
+      "  - leading-blank-line\n",
       "  - heading-levels\n",
       "  - frontmatter-sort\n",
       "---\n",
@@ -89,6 +91,7 @@ test("disabled rules accept one stable scalar ID or a sequence", () => {
   assert.equal(sequence.disabledAll, false);
   assert.deepEqual([...sequence.disabledRules], [
     "blank-lines",
+    "leading-blank-line",
     "heading-levels",
     "frontmatter-sort",
   ]);

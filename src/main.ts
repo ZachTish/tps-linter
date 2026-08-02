@@ -745,6 +745,8 @@ export default class TPSLinterPlugin extends Plugin {
         this.settings.trimNonblankTrailingWhitespace,
       removeTrailingBlankLines: this.settings.removeTrailingBlankLines,
       ensureFinalNewline: this.settings.ensureFinalNewline,
+      ensureBlankLineAtBeginning:
+        this.settings.ensureBlankLineAtBeginning,
       headingCapitalizationStyle:
         this.settings.headingCapitalizationStyle,
       normalizeHeadingLevels: this.settings.normalizeHeadingLevels,
@@ -903,6 +905,13 @@ export default class TPSLinterPlugin extends Plugin {
     if (reorderedFields > 0) {
       actions.push(
         `${applied ? "reordered" : "reorder"} ${reorderedFields} frontmatter ${plural("field", reorderedFields)}`,
+      );
+    }
+    if (result.changes.leadingBlankLineAdded) {
+      actions.push(
+        applied
+          ? "added a blank line at the beginning of the note"
+          : "add a blank line at the beginning of the note",
       );
     }
     if (result.changes.frontmatterBlankLineAdded) {

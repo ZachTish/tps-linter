@@ -31,6 +31,7 @@ export const TPS_LINTER_RULE_IDS = Object.freeze([
   "trailing-whitespace",
   "trailing-blank-lines",
   "final-newline",
+  "leading-blank-line",
   "heading-capitalization",
   "heading-levels",
   "frontmatter-blank-line",

@@ -12,6 +12,7 @@ const SPACING_ONLY_OPTIONS: MarkdownCleanupOptions = {
   trimNonblankTrailingWhitespace: false,
   removeTrailingBlankLines: false,
   ensureFinalNewline: false,
+  ensureBlankLineAtBeginning: false,
   headingCapitalizationStyle: "off",
   normalizeHeadingLevels: false,
   pushHeadingHierarchyToH6: false,

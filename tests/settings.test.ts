@@ -15,6 +15,7 @@ const EXPECTED_SETTING_KEYS = [
   "collapseConsecutiveBlankLines",
   "diagnostics",
   "ensureBlankLineAfterFrontmatter",
+  "ensureBlankLineAtBeginning",
   "ensureFinalNewline",
   "excludedPaths",
   "filenameUnsafeCharacterStyle",
@@ -32,7 +33,7 @@ const EXPECTED_SETTING_KEYS = [
 
 test("settings defaults are conservative and TPS-specific", () => {
   assert.deepEqual(DEFAULT_SETTINGS, {
-    schemaVersion: 5,
+    schemaVersion: 6,
     lintOnSave: true,
     cleanFilenames: true,
     filenameUnsafeCharacterStyle: "space",
@@ -42,6 +43,7 @@ test("settings defaults are conservative and TPS-specific", () => {
     trimNonblankTrailingWhitespace: false,
     removeTrailingBlankLines: false,
     ensureFinalNewline: true,
+    ensureBlankLineAtBeginning: false,
     headingCapitalizationStyle: "first-letter",
     normalizeHeadingLevels: true,
     pushHeadingHierarchyToH6: false,
@@ -84,10 +86,16 @@ test("GCM property priority is trimmed, case-deduplicated, and fail-safe", () =>
   );
 });
 
-test("schema v5 enables active-note save linting and keeps frontmatter spacing opt-in", () => {
+test("schema v6 keeps both blank-line insertion rules opt-in", () => {
   assert.equal(DEFAULT_SETTINGS.lintOnSave, true);
+  assert.equal(DEFAULT_SETTINGS.ensureBlankLineAtBeginning, false);
   assert.equal(DEFAULT_SETTINGS.ensureBlankLineAfterFrontmatter, false);
   assert.equal(normalizeSettings({ lintOnSave: false }).lintOnSave, false);
+  assert.equal(
+    normalizeSettings({ ensureBlankLineAtBeginning: true })
+      .ensureBlankLineAtBeginning,
+    true,
+  );
   assert.equal(
     normalizeSettings({ ensureBlankLineAfterFrontmatter: true })
       .ensureBlankLineAfterFrontmatter,
@@ -95,7 +103,7 @@ test("schema v5 enables active-note save linting and keeps frontmatter spacing o
   );
 });
 
-test("normalization accepts valid values and stamps schema v5", () => {
+test("normalization accepts valid values and stamps schema v6", () => {
   assert.deepEqual(
     normalizeSettings({
       schemaVersion: 999,
@@ -108,6 +116,7 @@ test("normalization accepts valid values and stamps schema v5", () => {
       trimNonblankTrailingWhitespace: true,
       removeTrailingBlankLines: true,
       ensureFinalNewline: false,
+      ensureBlankLineAtBeginning: true,
       headingCapitalizationStyle: "title-case",
       normalizeHeadingLevels: false,
       pushHeadingHierarchyToH6: true,
@@ -128,6 +137,7 @@ test("normalization accepts valid values and stamps schema v5", () => {
       trimNonblankTrailingWhitespace: true,
       removeTrailingBlankLines: true,
       ensureFinalNewline: false,
+      ensureBlankLineAtBeginning: true,
       headingCapitalizationStyle: "title-case",
       normalizeHeadingLevels: false,
       pushHeadingHierarchyToH6: true,
@@ -152,6 +162,7 @@ test("invalid enum and primitive values safely fall back", () => {
       trimNonblankTrailingWhitespace: null,
       removeTrailingBlankLines: "yes",
       ensureFinalNewline: {},
+      ensureBlankLineAtBeginning: "yes",
       headingCapitalizationStyle: "sentence-case",
       normalizeHeadingLevels: "true",
       pushHeadingHierarchyToH6: "yes",
@@ -195,8 +206,9 @@ test("v2 migration adds the new heading option without restoring removed exclusi
     normalizeHeadingLevels: true,
   });
 
-  assert.equal(normalized.schemaVersion, 5);
+  assert.equal(normalized.schemaVersion, 6);
   assert.equal(normalized.lintOnSave, true);
+  assert.equal(normalized.ensureBlankLineAtBeginning, false);
   assert.equal(normalized.ensureBlankLineAfterFrontmatter, false);
   assert.equal(normalized.pushHeadingHierarchyToH6, false);
   assert.equal(normalized.cleanFilenames, true);
@@ -204,15 +216,16 @@ test("v2 migration adds the new heading option without restoring removed exclusi
   assert.deepEqual(normalized.excludedPaths, ["Custom/Safe"]);
 });
 
-test("v3 migration preserves behavior and adds schema v5 controls", () => {
+test("v3 migration preserves behavior and adds later controls", () => {
   const normalized = normalizeSettings({
     schemaVersion: 3,
     excludedPaths: ["Custom/Safe"],
     pushHeadingHierarchyToH6: true,
   });
 
-  assert.equal(normalized.schemaVersion, 5);
+  assert.equal(normalized.schemaVersion, 6);
   assert.equal(normalized.lintOnSave, true);
+  assert.equal(normalized.ensureBlankLineAtBeginning, false);
   assert.equal(normalized.ensureBlankLineAfterFrontmatter, false);
   assert.equal(normalized.cleanFilenames, true);
   assert.equal(normalized.removeTrailingBlankLines, false);
@@ -227,10 +240,28 @@ test("v4 migration enables requested save linting and keeps new spacing off", ()
     pushHeadingHierarchyToH6: true,
   });
 
-  assert.equal(normalized.schemaVersion, 5);
+  assert.equal(normalized.schemaVersion, 6);
   assert.equal(normalized.lintOnSave, true);
+  assert.equal(normalized.ensureBlankLineAtBeginning, false);
   assert.equal(normalized.ensureBlankLineAfterFrontmatter, false);
   assert.equal(normalized.pushHeadingHierarchyToH6, true);
+  assert.deepEqual(normalized.excludedPaths, ["Custom/Safe"]);
+});
+
+test("v5 migration preserves existing choices and adds leading spacing off", () => {
+  const normalized = normalizeSettings({
+    schemaVersion: 5,
+    lintOnSave: false,
+    collapseConsecutiveBlankLines: false,
+    ensureBlankLineAfterFrontmatter: true,
+    excludedPaths: ["Custom/Safe"],
+  });
+
+  assert.equal(normalized.schemaVersion, 6);
+  assert.equal(normalized.lintOnSave, false);
+  assert.equal(normalized.collapseConsecutiveBlankLines, false);
+  assert.equal(normalized.ensureBlankLineAtBeginning, false);
+  assert.equal(normalized.ensureBlankLineAfterFrontmatter, true);
   assert.deepEqual(normalized.excludedPaths, ["Custom/Safe"]);
 });
 
@@ -300,6 +331,7 @@ test("settings UI preserves controls behind four accessible transient routes", (
 
   for (const settingName of [
     "Lint notes on save",
+    "Add blank line at beginning of note",
     "Remove extra blank lines",
     "Clear whitespace-only lines",
     "Trim nonblank trailing whitespace",

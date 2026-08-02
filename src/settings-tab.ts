@@ -240,6 +240,18 @@ export class TPSLinterSettingTab extends PluginSettingTab {
       });
 
     new Setting(parent)
+      .setName("Add blank line at beginning of note")
+      .setDesc("Insert one empty first line in notes without frontmatter. Frontmatter stays on line one; use Add blank line after frontmatter for those notes.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.ensureBlankLineAtBeginning)
+          .onChange(async (value) => {
+            this.plugin.settings.ensureBlankLineAtBeginning = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(parent)
       .setName("Remove extra blank lines")
       .setDesc("Collapse consecutive blank lines to one outside protected YAML, code, math, raw HTML, and Templater regions.")
       .addToggle((toggle) => {
@@ -475,7 +487,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
     const ruleCopy = reference.createEl("p");
     ruleCopy.appendText("Rule IDs: ");
     ruleCopy.createEl("code", {
-      text: "filename, whitespace-only-lines, blank-lines, trailing-whitespace, trailing-blank-lines, final-newline, heading-capitalization, heading-levels, frontmatter-blank-line, frontmatter-sort, all",
+      text: "filename, whitespace-only-lines, blank-lines, trailing-whitespace, trailing-blank-lines, final-newline, leading-blank-line, heading-capitalization, heading-levels, frontmatter-blank-line, frontmatter-sort, all",
     });
     ruleCopy.appendText(".");
 

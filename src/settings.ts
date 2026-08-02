@@ -1,4 +1,4 @@
-export const SETTINGS_SCHEMA_VERSION = 5 as const;
+export const SETTINGS_SCHEMA_VERSION = 6 as const;
 
 export type FilenameUnsafeCharacterStyle = "space" | "dash" | "remove";
 export type HeadingCapitalizationStyle =
@@ -18,6 +18,7 @@ export interface TPSLinterSettings {
   trimNonblankTrailingWhitespace: boolean;
   removeTrailingBlankLines: boolean;
   ensureFinalNewline: boolean;
+  ensureBlankLineAtBeginning: boolean;
   headingCapitalizationStyle: HeadingCapitalizationStyle;
   normalizeHeadingLevels: boolean;
   pushHeadingHierarchyToH6: boolean;
@@ -63,6 +64,7 @@ export const DEFAULT_SETTINGS: ReadonlyTPSLinterSettings = Object.freeze({
   trimNonblankTrailingWhitespace: false,
   removeTrailingBlankLines: false,
   ensureFinalNewline: true,
+  ensureBlankLineAtBeginning: false,
   headingCapitalizationStyle: "first-letter",
   normalizeHeadingLevels: true,
   pushHeadingHierarchyToH6: false,
@@ -133,6 +135,10 @@ export function normalizeSettings(loadedData: unknown): TPSLinterSettings {
     ensureFinalNewline: readBoolean(
       data.ensureFinalNewline,
       DEFAULT_SETTINGS.ensureFinalNewline,
+    ),
+    ensureBlankLineAtBeginning: readBoolean(
+      data.ensureBlankLineAtBeginning,
+      DEFAULT_SETTINGS.ensureBlankLineAtBeginning,
     ),
     headingCapitalizationStyle: isHeadingCapitalizationStyle(
       data.headingCapitalizationStyle,

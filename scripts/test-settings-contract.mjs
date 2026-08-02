@@ -24,7 +24,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.5.8",
+    version: "0.6.0",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
@@ -54,6 +54,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.5.6": "1.10.0",
     "0.5.7": "1.10.0",
     "0.5.8": "1.10.0",
+    "0.6.0": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -62,6 +63,21 @@ test("TPS Linter release metadata is aligned", () => {
 test("TPS Linter exposes explicit check and clean commands", () => {
   assert.match(mainSource, /name:\s*["']Check current note["']/);
   assert.match(mainSource, /name:\s*["']Clean current note["']/);
+});
+
+test("leading blank-line cleanup is wired through settings, runtime, and reporting", () => {
+  assert.match(
+    mainSource,
+    /ensureBlankLineAtBeginning:\s*this\.settings\.ensureBlankLineAtBeginning/,
+  );
+  assert.match(cleanerSource, /function addBlankLineAtBeginning\(input: string\)/);
+  assert.match(cleanerSource, /!disabledRules\.has\("leading-blank-line"\)/);
+  assert.match(cleanerSource, /cleanup output would exceed a safety limit/);
+  assert.match(mainSource, /added a blank line at the beginning of the note/);
+  assert.match(
+    settingsTabSource,
+    /setName\("Add blank line at beginning of note"\)/,
+  );
 });
 
 test("save linting is active-note scoped and keeps automatic filename ownership with GCM", () => {
@@ -536,6 +552,7 @@ test("note-local controls, range markers, and idempotence gates remain stable", 
     "trailing-whitespace",
     "trailing-blank-lines",
     "final-newline",
+    "leading-blank-line",
     "heading-capitalization",
     "heading-levels",
     "frontmatter-blank-line",
@@ -623,6 +640,7 @@ test("note-local controls, range markers, and idempotence gates remain stable", 
 
 test("TPS Linter settings destinations stay accessible, responsive, and namespaced", () => {
   assert.match(settingsTabSource, /setName\("Lint notes on save"\)/);
+  assert.match(settingsTabSource, /setName\("Add blank line at beginning of note"\)/);
   assert.match(settingsTabSource, /setName\("Add blank line after frontmatter"\)/);
   assert.match(settingsTabSource, /tps-linter-settings-actions/);
   assert.match(settingsTabSource, /tps-linter-settings-ownership/);

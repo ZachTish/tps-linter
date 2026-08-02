@@ -1,10 +1,10 @@
 # TPS Linter
 
-TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.5.8` checks sibling filename collisions in one ordered pass, normalizing each sibling path once and stopping at the first collision. Every released command, setting, rule, fail-closed guard, protected-Markdown contract, and ownership-safe filename behavior remains available.
+TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.6.0` adds an opt-in leading blank-line rule for plain notes while keeping Obsidian frontmatter fixed on line one. Every released command, setting, rule, fail-closed guard, protected-Markdown contract, and ownership-safe filename behavior remains available.
 
 ## Install with BRAT
 
-Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.5.8`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
+Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.6.0`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
 
 The released build is validated in the isolated Obsidian Plugin Test Vault. Publishing the release does not install it in the production vault; the production update remains a separate user-owned BRAT pull.
 
@@ -19,7 +19,7 @@ TPS Linter takes inspiration from upstream's consecutive-blank-line, heading-cap
 - **Check current note** is read-only. It reports the filename and Markdown changes that the current rules would make.
 - **Clean current note** re-evaluates the live file, atomically cleans eligible Markdown content, and applies an eligible filename change only when filename ownership and collision guards allow it.
 - The same two actions are available in a Markdown file's context menu and at the top of the settings page.
-- **Lint notes on save** is enabled by default in schema v5. After Obsidian reports that the active Markdown editor was persisted, TPS Linter waits 500 ms, coalesces repeated events, rechecks the live note and editor buffer, and applies enabled content rules when the editor is still active, saved, and eligible.
+- **Lint notes on save** is enabled by default. After Obsidian reports that the active Markdown editor was persisted, TPS Linter waits 500 ms, coalesces repeated events, rechecks the live note and editor buffer, and applies enabled content rules when the editor is still active, saved, and eligible.
 
 Save linting is content-only: it never plans or applies a filename change, never shows a routine notification, and never turns an external or sync burst into a whole-vault cleanup. There is no startup scan, batch mutation command, paste hook, or inactive-note sweep.
 
@@ -50,7 +50,9 @@ The default Markdown cleanup:
 - adds a missing final newline to a non-empty file; and
 - leaves nonblank trailing whitespace and terminal blank padding alone unless the user explicitly enables those rules.
 
-**Add blank line after frontmatter** is a separate default-off rule. When a safe, closed, top-of-note YAML mapping is immediately followed by body content, it inserts one empty physical line using the closing delimiter's line ending. It leaves existing empty or whitespace-only separator lines alone, does not add padding to frontmatter-only notes, accepts `---` or `...` closers, preserves a leading BOM, and fails closed for malformed, duplicate-key, non-mapping, tagged, anchored, aliased, or otherwise unsafe YAML. Extra separator lines remain owned by **Remove extra blank lines**.
+**Add blank line at beginning of note** is a separate default-off rule for notes without frontmatter. It inserts one empty physical first line before nonblank content, reuses the first existing LF, CRLF, or CR ending, and falls back to LF only for a one-line unterminated note. It leaves an existing empty or whitespace-only first line alone and never manufactures content in an empty, BOM-only, or blank-only note. A UTF-8 BOM remains byte zero and the separator follows it. Any exact first-line `---` opener is never displaced—even when its YAML is malformed, unsafe, or unclosed—because Obsidian requires frontmatter to remain on line one.
+
+**Add blank line after frontmatter** remains the independent default-off choice for frontmatter notes. When a safe, closed, top-of-note YAML mapping is immediately followed by body content, it inserts one empty physical line using the closing delimiter's line ending. It leaves existing empty or whitespace-only separator lines alone, does not add padding to frontmatter-only notes, accepts `---` or `...` closers, preserves a leading BOM, and fails closed for malformed, duplicate-key, non-mapping, tagged, anchored, aliased, or otherwise unsafe YAML. With both options enabled, a plain note receives only beginning spacing and a frontmatter note receives only after-frontmatter spacing. Extra separator lines remain owned by **Remove extra blank lines**.
 
 When nonblank trailing-whitespace cleanup is enabled, two literal terminal spaces are retained as a Markdown hard break. Optional terminal-blank cleanup removes only unprotected space/tab blank lines and still retains exactly one final newline. Existing UTF-8 BOMs are retained, including before a first-line heading, and rewritten content keeps the note's LF, CRLF, or CR line-ending style.
 
@@ -85,7 +87,9 @@ tps-linter-disabled-rules:
 ---
 ```
 
-The stable IDs are `filename`, `whitespace-only-lines`, `blank-lines`, `trailing-whitespace`, `trailing-blank-lines`, `final-newline`, `heading-capitalization`, `heading-levels`, `frontmatter-blank-line`, `frontmatter-sort`, and `all`. Values can be one scalar ID or a sequence. Keys must be exact, top-level keys. Structurally valid root block maps—including uniformly indented maps—flow maps, explicit scalar keys, quoted keys, and escaped quoted keys are recognized. Nested lookalikes remain ordinary note data. Unknown or duplicate IDs, duplicate/case-colliding keys, malformed control-like YAML, aliases, anchors, tags, merge keys, and unsupported YAML fail closed. After the unchanged character and line safety limits, frontmatter with neither a literal control-key candidate nor a backslash returns without loading the YAML parser. A backslash always retains full parsing so escaped control keys remain discoverable; candidate controls still follow every existing structural and fail-closed validation rule.
+The stable IDs are `filename`, `whitespace-only-lines`, `blank-lines`, `trailing-whitespace`, `trailing-blank-lines`, `final-newline`, `leading-blank-line`, `heading-capitalization`, `heading-levels`, `frontmatter-blank-line`, `frontmatter-sort`, and `all`. Values can be one scalar ID or a sequence. Keys must be exact, top-level keys. Structurally valid root block maps—including uniformly indented maps—flow maps, explicit scalar keys, quoted keys, and escaped quoted keys are recognized. Nested lookalikes remain ordinary note data. Unknown or duplicate IDs, duplicate/case-colliding keys, malformed control-like YAML, aliases, anchors, tags, merge keys, and unsupported YAML fail closed. After the unchanged character and line safety limits, frontmatter with neither a literal control-key candidate nor a backslash returns without loading the YAML parser. A backslash always retains full parsing so escaped control keys remain discoverable; candidate controls still follow every existing structural and fail-closed validation rule.
+
+`leading-blank-line` is a stable API identifier for consistency, but an applicable note has no frontmatter in which to store a note-local override. Configure that rule globally or use a path exclusion. Notes that do have frontmatter can use `frontmatter-blank-line` for the independent after-frontmatter rule.
 
 Exact body ranges can be protected with standalone markers:
 
@@ -133,7 +137,7 @@ Check and Clean actions remain first. The always-visible **Choose what to config
 
 **Clean notes** is the default route. Only the active destination is rendered, with one conditional control for the first heading level. Route, focus, disclosure, and scroll state are transient and create no persisted fields. Route buttons use `aria-pressed`; focus is restored after user-invoked rerenders; keyboard focus is visible. On narrow screens the route hub is a horizontally scrollable strip, action cards stack, controls use full width, and labels wrap. Every CSS selector is namespaced under `tps-linter`.
 
-Persisted data uses schema version `5` and contains only workflow/rule choices, exclusion patterns, and the diagnostics toggle. Unknown or invalid saved values normalize to safe defaults. Loading schema v1 preserves custom exclusions and appends `_templates` and `System/Templates`; later schemas preserve intentional exclusion removals and existing rule choices. Existing installations retain their H6, filename, and terminal-blank choices, receive `lintOnSave: true` as requested, and receive `ensureBlankLineAfterFrontmatter: false` so the new spacing rule remains opt-in.
+Persisted data uses schema version `6` and contains only workflow/rule choices, exclusion patterns, and the diagnostics toggle. Unknown or invalid saved values normalize to safe defaults. Loading schema v1 preserves custom exclusions and appends `_templates` and `System/Templates`; later schemas preserve intentional exclusion removals and existing rule choices. Schema-v5 installations retain their save, H6, filename, terminal-blank, frontmatter-spacing, and exclusion choices and receive `ensureBlankLineAtBeginning: false`, so the new mutation is opt-in.
 
 ## Diagnostics and safety
 
@@ -143,7 +147,7 @@ The plugin has no network access, credentials, scheduled sweep, startup scan, cr
 
 Every manual Clean takes a fresh read, snapshots rule options, and enters one unconditional `Vault.process` callback. Manual Check/Clean inspection performs one initial safety scan and note-control parse for that exact revision and shares the result with Markdown cleanup. When the process callback receives exactly the same bytes, it reuses the already verified preflight result; any byte difference, including BOM or line-ending representation, runs the original cleanup against the current revision. Post-clean note-control comparison and second-pass idempotence verification remain independent. Manual inspection and cleaning require the selected Markdown `TFile` to remain the exact object currently indexed by the vault before and after inspection reads, inside the process callback, after processing, and after the final filename read. A deleted and recreated same-path note never inherits content or filename work; the plugin does not retry, reacquire by path, or use adapter-level mutation. Same-file manual and automatic cleans are serialized. The save scheduler debounces independently per note; an event during a run requests one delayed rerun, worker failures cannot wedge its state, disabling the setting cancels pending timers, and plugin unload invalidates in-flight work before preventing reruns. The automatic worker rechecks enablement, plugin lifecycle, active editor/file identity, source mode, Markdown type, initial-plus-live exclusions, current rule settings, and that the editor buffer still matches the persisted revision at the asynchronous mutation boundaries. Representation-only BOM and LF/CRLF/CR differences are tolerated; exact editor/file matches avoid normalization allocations. Real unsaved edits cause a no-write skip until the next persisted modification. Its own modify event converges through a no-write preflight rather than relying on timing-sensitive suppression; when both the persisted bytes and complete rule options remain identical at `Vault.process`, that verified pure cleanup result is reused instead of cleaning the same revision twice. Manual path exclusions are rechecked without relaxing the initial scope inside the callback, before filename planning, and after the final fresh read. Note-local controls and filename ownership are re-read from the final live content before manual rename eligibility. Markdown success is reported even if a later rename fails.
 
-Bounded-work guards reject notes over 2,000,000 characters or 50,000 physical lines, individual lines over 32,000 characters, container nesting over 64 steps, more than 2,048 protected tokens on one line, more than 4,096 protected tokens across a note, frontmatter over 500,000 characters or 2,000 lines, and sortable frontmatter over 1,000 fields. These are deliberate UI-safety limits; blocked notes are unchanged and receive a reason.
+Bounded-work guards reject notes over 2,000,000 characters or 50,000 physical lines, individual lines over 32,000 characters, container nesting over 64 steps, more than 2,048 protected tokens on one line, more than 4,096 protected tokens across a note, frontmatter over 500,000 characters or 2,000 lines, and sortable frontmatter over 1,000 fields. The complete proposed output is checked again before it can be returned, so adding a blank or final newline cannot push a boundary-sized note beyond those limits. These are deliberate UI-safety limits; blocked notes are unchanged and receive a reason.
 
 ## Known limitations
 
@@ -177,6 +181,12 @@ npm run build
 ```
 
 Stable production-mode builds deploy byte-changed `main.js`, `manifest.json`, and `styles.css` only to the isolated test runtime `.obsidian/plugins/tps-linter`. They do not overwrite runtime-owned `data.json`. Direct production deployment is not part of this workflow.
+
+### 0.6.0 validation
+
+Validation covers the default-off leading-spacing setting and schema-v5 migration; LF, CRLF, CR, mixed-ending, and no-ending insertion; BOM preservation; existing and blank-only notes; valid, malformed, unsafe, duplicate-key, and unclosed frontmatter; independence from after-frontmatter spacing; protected first constructs; heading/final-newline/blank-cleanup composition; exact output safety boundaries; and randomized deterministic/idempotent Markdown. The focused suite passes 12 tests, the complete declared suite passes 156 unit/property tests and 15 structural contracts plus TypeScript, and a pinned historical differential preserves exact released behavior across 10,003 cases while the new setting is off.
+
+The required separate production-mode build deployed only byte-changed plugin artifacts to the isolated test runtime and preserved `data.json`; Hot Reload visibly refreshed Obsidian `1.12.7` in **Obsidian Plugin Test Vault**. All four settings destinations were inspected. Runtime Check/Clean QA reported and applied the new action on a messy plain note, kept frontmatter byte zero on a separate guard note, restored the option off, and moved both synthetic notes directly from `Inbox` to `_archive`. Exact artifact hashes, settings-state hashes, notices, reload evidence, and QA-note disposition are recorded in `release-notes/0.6.0.md`.
 
 ### 0.5.8 validation
 
@@ -233,6 +243,14 @@ Validation covers safe YAML CST sorting and semantic verification, GCM property-
 Validation covers pure filename planning and collision/ownership guards, TPS filename preservation, exact line-ending and protected-block preservation, idempotence, settings normalization, command and settings contracts, TypeScript, the complete declared suite, a separate final production-mode build, runtime deployment, and a reloaded test-vault UI inspection. Exact final test counts, reload evidence, and artifact hashes are recorded in `release-notes/0.1.0.md`.
 
 ## Version history
+
+### 0.6.0
+
+- Adds default-off **Add blank line at beginning of note** for plain notes.
+- Preserves byte-zero BOMs and existing LF, CRLF, CR, and mixed endings; empty, blank-only, and already-spaced notes stay unchanged.
+- Never displaces any first-line `---` opener, including malformed, unsafe, or unclosed frontmatter; frontmatter notes continue to use the independent after-frontmatter option.
+- Adds the stable `leading-blank-line` rule ID, manual Check/Clean reporting, schema-v6 migration, output-boundary verification, and BOM-aware leading blank cleanup.
+- Preserves lint-on-save scope, filename ownership, all existing rule defaults, commands, exclusions, and protected-Markdown behavior.
 
 ### 0.5.8
 
