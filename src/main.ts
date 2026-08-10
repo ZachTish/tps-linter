@@ -1,8 +1,10 @@
 import {
   App,
+  Component,
   Menu,
   MarkdownView,
   Notice,
+  Platform,
   Plugin,
   TAbstractFile,
   TFile,
@@ -46,7 +48,9 @@ import {
   SaveLintLifecycle,
   SaveLintScheduler,
   editorContentMatchesFile,
+  isManualSaveShortcut,
 } from "./save-lint-scheduler";
+import { formatSaveLintNotice } from "./save-lint-feedback";
 import { isCurrentMarkdownFile } from "./vault-file-identity";
 
 type CleanupTrigger = "command" | "file-menu" | "settings";
@@ -75,6 +79,7 @@ interface CleanResult {
 export default class TPSLinterPlugin extends Plugin {
   settings!: TPSLinterSettings;
   private readonly activeCleans = new WeakSet<TFile>();
+  private readonly saveShortcutObservers = new Map<Document, Component>();
   private readonly saveLintLifecycle = new SaveLintLifecycle();
   private saveLintScheduler: SaveLintScheduler<TFile> | null = null;
 
@@ -90,6 +95,12 @@ export default class TPSLinterPlugin extends Plugin {
         delayMs: SAVE_LINT_DEBOUNCE_MS,
         onError: (error, file) => {
           logError("save", file.path, "automatic clean failed", error);
+          if (
+            this.saveLintLifecycle.isCurrent(lifecycleGeneration) &&
+            this.settings.lintOnSave
+          ) {
+            new Notice("TPS Linter could not clean the saved note.", 5000);
+          }
         },
       },
     );
@@ -116,6 +127,23 @@ export default class TPSLinterPlugin extends Plugin {
         this.queueSaveLint(file);
       }),
     );
+
+    this.registerEvent(
+      this.app.workspace.on("window-open", (workspaceWindow) => {
+        this.observeSaveShortcuts(workspaceWindow.doc);
+      }),
+    );
+    this.registerEvent(
+      this.app.workspace.on("window-close", (workspaceWindow) => {
+        this.stopObservingSaveShortcuts(workspaceWindow.doc);
+      }),
+    );
+    this.observeCurrentSaveShortcutDocuments();
+    this.app.workspace.onLayoutReady(() => {
+      if (this.saveLintLifecycle.isCurrent(lifecycleGeneration)) {
+        this.observeCurrentSaveShortcutDocuments();
+      }
+    });
 
     this.registerEvent(
       this.app.workspace.on(
@@ -147,10 +175,62 @@ export default class TPSLinterPlugin extends Plugin {
     logDiagnostic("load", this.manifest.id, "ready");
   }
 
+  private observeCurrentSaveShortcutDocuments(): void {
+    const documents = new Set<Document>([document]);
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const container = leaf.getContainer();
+      if (container?.doc) documents.add(container.doc);
+    });
+    for (const doc of documents) this.observeSaveShortcuts(doc);
+  }
+
+  private observeSaveShortcuts(doc: Document): void {
+    if (this.saveShortcutObservers.has(doc)) return;
+    const eventWindow = doc.defaultView;
+    if (!eventWindow) return;
+    const observer = this.addChild(new Component());
+    this.saveShortcutObservers.set(doc, observer);
+
+    observer.registerDomEvent(
+      eventWindow,
+      "keydown",
+      (event) => {
+        if (!isManualSaveShortcut(event, Platform.isMacOS)) return;
+
+        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (
+          !view?.file ||
+          view.getMode() !== "source" ||
+          view.containerEl.doc !== doc
+        ) {
+          return;
+        }
+
+        const target = event.targetNode;
+        if (!target || !view.containerEl.contains(target)) {
+          return;
+        }
+
+        this.queueSaveLint(view.file);
+      },
+      { capture: true, passive: true },
+    );
+  }
+
+  private stopObservingSaveShortcuts(doc: Document): void {
+    const observer = this.saveShortcutObservers.get(doc);
+    if (!observer) return;
+    this.saveShortcutObservers.delete(doc);
+    this.removeChild(observer);
+  }
+
   onunload(): void {
     this.saveLintLifecycle.invalidate();
     this.saveLintScheduler?.dispose();
     this.saveLintScheduler = null;
+    for (const doc of [...this.saveShortcutObservers.keys()]) {
+      this.stopObservingSaveShortcuts(doc);
+    }
     logDiagnostic("unload", this.manifest.id, "complete");
   }
 
@@ -344,6 +424,10 @@ export default class TPSLinterPlugin extends Plugin {
         file.path,
         this.describeMarkdown(result, result.changed),
       );
+      if (this.saveLintLifecycle.isCurrent(lifecycleGeneration)) {
+        const noticeMessage = formatSaveLintNotice(result);
+        if (noticeMessage) new Notice(noticeMessage, 4000);
+      }
     } finally {
       this.activeCleans.delete(file);
     }

@@ -1,10 +1,10 @@
 # TPS Linter
 
-TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.6.0` adds an opt-in leading blank-line rule for plain notes while keeping Obsidian frontmatter fixed on line one. Every released command, setting, rule, fail-closed guard, protected-Markdown contract, and ownership-safe filename behavior remains available.
+TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.6.1` makes the standard Cmd-S/Ctrl-S shortcut lint an already-open note even when Obsidian has no changed bytes to persist, and shows a concise result notice after save lint actually changes content. Every released command, setting, rule, fail-closed guard, protected-Markdown contract, and ownership-safe filename behavior remains available.
 
 ## Install with BRAT
 
-Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.6.0`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
+Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.6.1`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
 
 The released build is validated in the isolated Obsidian Plugin Test Vault. Publishing the release does not install it in the production vault; the production update remains a separate user-owned BRAT pull.
 
@@ -19,9 +19,9 @@ TPS Linter takes inspiration from upstream's consecutive-blank-line, heading-cap
 - **Check current note** is read-only. It reports the filename and Markdown changes that the current rules would make.
 - **Clean current note** re-evaluates the live file, atomically cleans eligible Markdown content, and applies an eligible filename change only when filename ownership and collision guards allow it.
 - The same two actions are available in a Markdown file's context menu and at the top of the settings page.
-- **Lint notes on save** is enabled by default. After Obsidian reports that the active Markdown editor was persisted, TPS Linter waits 500 ms, coalesces repeated events, rechecks the live note and editor buffer, and applies enabled content rules when the editor is still active, saved, and eligible.
+- **Lint notes on save** is enabled by default. After Obsidian reports that the active Markdown editor was persisted, or after the standard platform save gesture (Cmd-S on Apple devices and Ctrl-S elsewhere) inside that editor, TPS Linter waits 500 ms, coalesces repeated events, rechecks the live note and editor buffer, and applies enabled content rules when the editor is still active, saved, and eligible.
 
-Save linting is content-only: it never plans or applies a filename change, never shows a routine notification, and never turns an external or sync burst into a whole-vault cleanup. There is no startup scan, batch mutation command, paste hook, or inactive-note sweep.
+Save linting is content-only: it never plans or applies a filename change and never turns an external or sync burst into a whole-vault cleanup. A native top-right Obsidian notice briefly lists only changes that were successfully applied. It names at most three cleanup actions, then gives the exact number of remaining fixes, and has a 180-character ceiling. Already-clean, excluded, inactive, unsafe, or self-convergence passes remain silent, so one automatic clean produces one notice rather than a second “already clean” message. There is no startup scan, batch mutation command, paste hook, or inactive-note sweep.
 
 ## Filename rules and ownership
 
@@ -124,7 +124,7 @@ The initial editable exclusions are:
 - `System/Templates`
 - `README.md`
 
-No startup scan occurs. Check and manual Clean operate only on the explicitly selected current note. Save linting queues only a modified Markdown file that matches the active source-mode Markdown editor at the event and again before mutation; inactive, preview-only, deleted, replaced, renamed-away, excluded, non-Markdown, and newer-unsaved-buffer targets are skipped.
+No startup scan occurs. Check and manual Clean operate only on the explicitly selected current note. Save linting queues only a modified Markdown file or the current file from the standard platform save gesture when that gesture originates inside the active source-mode Markdown editor and the same file still matches again before mutation; Settings, modals, sidebars, other views, inactive notes, preview-only notes, deleted, replaced, renamed-away, excluded, non-Markdown, and newer-unsaved-buffer targets are skipped.
 
 ## Settings design
 
@@ -143,7 +143,7 @@ Persisted data uses schema version `6` and contains only workflow/rule choices, 
 
 Diagnostics are disabled by default. When enabled, TPS Linter logs only compact trigger, path, and result fields. It never logs note bodies or complete settings payloads. Warnings and errors report the affected path without exposing content.
 
-The plugin has no network access, credentials, scheduled sweep, startup scan, create hook, rename hook, file-open hook, deletion, archive movement, or production deployment path. It registers exactly one supported Vault `modify` hook for active-note save linting and no undocumented save-command patch.
+The plugin has no network access, credentials, scheduled sweep, startup scan, create hook, rename hook, file-open hook, deletion, archive movement, or production deployment path. It registers one supported Vault `modify` hook for persisted edits and one passive window-capture observer per open Obsidian workspace document for the standard save chord. Window capture lets TPS Linter observe the gesture before Obsidian consumes its own document-level handler; the observer is mechanically non-canceling and never alters that handler. Main-window, existing-popout, restored-popout, and newly opened popout documents are covered; closed-popout observers are detached. TPS Linter does not replace or patch Obsidian's save command and only schedules the same guarded worker when the chord target is inside the active source-mode Markdown view.
 
 Every manual Clean takes a fresh read, snapshots rule options, and enters one unconditional `Vault.process` callback. Manual Check/Clean inspection performs one initial safety scan and note-control parse for that exact revision and shares the result with Markdown cleanup. When the process callback receives exactly the same bytes, it reuses the already verified preflight result; any byte difference, including BOM or line-ending representation, runs the original cleanup against the current revision. Post-clean note-control comparison and second-pass idempotence verification remain independent. Manual inspection and cleaning require the selected Markdown `TFile` to remain the exact object currently indexed by the vault before and after inspection reads, inside the process callback, after processing, and after the final filename read. A deleted and recreated same-path note never inherits content or filename work; the plugin does not retry, reacquire by path, or use adapter-level mutation. Same-file manual and automatic cleans are serialized. The save scheduler debounces independently per note; an event during a run requests one delayed rerun, worker failures cannot wedge its state, disabling the setting cancels pending timers, and plugin unload invalidates in-flight work before preventing reruns. The automatic worker rechecks enablement, plugin lifecycle, active editor/file identity, source mode, Markdown type, initial-plus-live exclusions, current rule settings, and that the editor buffer still matches the persisted revision at the asynchronous mutation boundaries. Representation-only BOM and LF/CRLF/CR differences are tolerated; exact editor/file matches avoid normalization allocations. Real unsaved edits cause a no-write skip until the next persisted modification. Its own modify event converges through a no-write preflight rather than relying on timing-sensitive suppression; when both the persisted bytes and complete rule options remain identical at `Vault.process`, that verified pure cleanup result is reused instead of cleaning the same revision twice. Manual path exclusions are rechecked without relaxing the initial scope inside the callback, before filename planning, and after the final fresh read. Note-local controls and filename ownership are re-read from the final live content before manual rename eligibility. Markdown success is reported even if a later rename fails.
 
@@ -161,6 +161,7 @@ Bounded-work guards reject notes over 2,000,000 characters or 50,000 physical li
 - Protected-block detection is conservative. A malformed or unclosed protected construct remains untouched rather than being guessed at.
 - **Check current note** is advisory and may briefly reflect Obsidian's cached read; **Clean current note** always re-reads and processes the live file. A rare target collision with a same-named folder is caught by Obsidian's guarded rename and reported as a partial result rather than being included in the sibling-file preflight.
 - Mobile layout is covered by responsive contract tests and desktop-width inspection; final native iOS interaction remains a separate device check.
+- The conventional Cmd-S/Ctrl-S gesture can lint an unchanged open note because the key gesture is observable. A user-remapped Save command, menu-based no-op Save, or other no-op invocation that emits neither that gesture nor a Vault modification does not create a public Obsidian save event and therefore cannot be detected.
 
 ## Development and validation
 
@@ -181,6 +182,10 @@ npm run build
 ```
 
 Stable production-mode builds deploy byte-changed `main.js`, `manifest.json`, and `styles.css` only to the isolated test runtime `.obsidian/plugins/tps-linter`. They do not overwrite runtime-owned `data.json`. Direct production deployment is not part of this workflow.
+
+### 0.6.1 validation
+
+Validation covers exact platform Cmd-S/Ctrl-S recognition without consuming Obsidian's shortcut, main/popout document lifecycle, editor-target containment, the existing persisted-modification trigger, active source-mode and file-identity guards, bounded changed-result notices, silent no-change/self-convergence passes, error feedback, blank-line singular/plural summaries, content-only ownership, TypeScript, the complete declared suite, a separate production build, isolated runtime deployment, and reloaded test-vault save-flow QA. Exact final counts, artifact hashes, reload evidence, and QA-note disposition are recorded in `release-notes/0.6.1.md`.
 
 ### 0.6.0 validation
 
@@ -243,6 +248,14 @@ Validation covers safe YAML CST sorting and semantic verification, GCM property-
 Validation covers pure filename planning and collision/ownership guards, TPS filename preservation, exact line-ending and protected-block preservation, idempotence, settings normalization, command and settings contracts, TypeScript, the complete declared suite, a separate final production-mode build, runtime deployment, and a reloaded test-vault UI inspection. Exact final test counts, reload evidence, and artifact hashes are recorded in `release-notes/0.1.0.md`.
 
 ## Version history
+
+### 0.6.1
+
+- Makes Cmd/Ctrl-S schedule the existing guarded save-lint worker even when an already-open note has no new bytes for Obsidian to persist.
+- Observes the shortcut without preventing or replacing Obsidian's save behavior; persisted edits continue to use the supported Vault `modify` event and coalesce with the shortcut request.
+- Shows one concise native Obsidian notice after content changes are successfully applied, with exact rule counts such as removed blank lines or adjusted headings.
+- Keeps no-change, excluded, inactive, safety-blocked, and plugin-generated convergence passes silent; automatic filename cleanup remains disabled.
+- Preserves schema v6, every rule/default/exclusion, atomic `Vault.process` mutation, active-editor identity checks, protected Markdown, and all bounded-work guards.
 
 ### 0.6.0
 

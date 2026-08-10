@@ -6,6 +6,7 @@ import {
   SaveLintScheduler,
   editorContentMatchesFile,
   editorContentNeedsNormalization,
+  isManualSaveShortcut,
 } from "../src/save-lint-scheduler.ts";
 
 function deferred(): {
@@ -63,6 +64,46 @@ test("plain LF editor buffers do not enter representation normalization", () => 
   assert.equal(editorContentNeedsNormalization("\uFEFFBody\n"), true);
   assert.equal(editorContentNeedsNormalization("Body\r\n"), true);
   assert.equal(editorContentNeedsNormalization("Body\r"), true);
+});
+
+test("recognizes only the exact platform save modifier", () => {
+  const macSave = {
+    key: "s",
+    metaKey: true,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    repeat: false,
+    isComposing: false,
+  };
+
+  assert.equal(isManualSaveShortcut(macSave, true), true);
+  assert.equal(
+    isManualSaveShortcut({ ...macSave, key: "S" }, true),
+    true,
+  );
+  assert.equal(
+    isManualSaveShortcut(
+      { ...macSave, metaKey: false, ctrlKey: true },
+      false,
+    ),
+    true,
+  );
+
+  for (const [event, useMetaKey] of [
+    [{ ...macSave, key: "x" }, true],
+    [{ ...macSave, metaKey: false }, true],
+    [{ ...macSave, ctrlKey: true }, true],
+    [{ ...macSave, metaKey: false, ctrlKey: true }, true],
+    [{ ...macSave }, false],
+    [{ ...macSave, ctrlKey: true }, false],
+    [{ ...macSave, altKey: true }, true],
+    [{ ...macSave, shiftKey: true }, true],
+    [{ ...macSave, repeat: true }, true],
+    [{ ...macSave, isComposing: true }, true],
+  ] as const) {
+    assert.equal(isManualSaveShortcut(event, useMetaKey), false);
+  }
 });
 
 test("editor/file comparison exactly matches the former normalization semantics", () => {

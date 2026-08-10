@@ -11,6 +11,16 @@ export interface SaveLintSchedulerOptions<T> {
   timerApi?: SaveLintTimerApi;
 }
 
+export interface ManualSaveShortcutEvent {
+  key: string;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+  repeat: boolean;
+  isComposing: boolean;
+}
+
 interface ScheduledTimer {
   handle: unknown;
 }
@@ -33,6 +43,23 @@ const DEFAULT_TIMER_API: SaveLintTimerApi = {
     );
   },
 };
+
+export function isManualSaveShortcut(
+  event: ManualSaveShortcutEvent,
+  useMetaKey: boolean,
+): boolean {
+  const primaryModifier = useMetaKey ? event.metaKey : event.ctrlKey;
+  const secondaryModifier = useMetaKey ? event.ctrlKey : event.metaKey;
+  return (
+    event.key.toLowerCase() === "s" &&
+    primaryModifier &&
+    !secondaryModifier &&
+    !event.altKey &&
+    !event.shiftKey &&
+    !event.repeat &&
+    !event.isComposing
+  );
+}
 
 export function editorContentMatchesFile(
   editorContent: string,

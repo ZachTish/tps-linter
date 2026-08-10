@@ -24,7 +24,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.6.0",
+    version: "0.6.1",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
@@ -55,6 +55,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.5.7": "1.10.0",
     "0.5.8": "1.10.0",
     "0.6.0": "1.10.0",
+    "0.6.1": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -158,7 +159,14 @@ test("save linting is active-note scoped and keeps automatic filename ownership 
     "a changed revision must not use the preflight options snapshot",
   );
   assert.doesNotMatch(saveSource, /createFilenamePlan|createFilenameDecision/);
-  assert.doesNotMatch(saveSource, /renameFile|new Notice/);
+  assert.doesNotMatch(saveSource, /renameFile/);
+  assert.match(saveSource, /const noticeMessage = formatSaveLintNotice\(result\)/);
+  assert.match(saveSource, /if \(noticeMessage\) new Notice\(noticeMessage, 4000\)/);
+  assert.ok(
+    saveSource.indexOf("await this.app.vault.process(file,") <
+      saveSource.indexOf("formatSaveLintNotice(result)"),
+    "save feedback must be emitted only after the atomic process finishes",
+  );
 
   assert.match(saveLintSchedulerSource, /rerunRequested/);
   assert.match(saveLintSchedulerSource, /cancelPending\(\)/);
@@ -174,6 +182,7 @@ test("save linting is active-note scoped and keeps automatic filename ownership 
       unloadSource.indexOf("this.saveLintScheduler?.dispose()"),
     "unload must invalidate in-flight work before disposing queued work",
   );
+  assert.match(unloadSource, /this\.stopObservingSaveShortcuts\(doc\)/);
 
   const onloadSource = sourceBetween(
     mainSource,
@@ -185,6 +194,19 @@ test("save linting is active-note scoped and keeps automatic filename ownership 
     /await this\.loadSettings\(\);\s*if \(!this\.saveLintLifecycle\.isCurrent\(lifecycleGeneration\)\)/,
     "onload must not initialize after an unload during settings I/O",
   );
+  assert.match(onloadSource, /this\.observeCurrentSaveShortcutDocuments\(\)/);
+  assert.match(onloadSource, /this\.app\.workspace\.iterateAllLeaves/);
+  assert.match(onloadSource, /if \(container\?\.doc\) documents\.add\(container\.doc\)/);
+  assert.match(onloadSource, /this\.app\.workspace\.on\("window-open"/);
+  assert.match(onloadSource, /this\.app\.workspace\.on\("window-close"/);
+  assert.match(onloadSource, /const eventWindow = doc\.defaultView/);
+  assert.match(onloadSource, /observer\.registerDomEvent\(\s*eventWindow,\s*"keydown"/);
+  assert.match(onloadSource, /isManualSaveShortcut\(event, Platform\.isMacOS\)/);
+  assert.match(onloadSource, /view\.containerEl\.doc !== doc/);
+  assert.match(onloadSource, /view\.containerEl\.contains\(target\)/);
+  assert.match(onloadSource, /this\.queueSaveLint\(view\.file\)/);
+  assert.match(onloadSource, /\{ capture: true, passive: true \}/);
+  assert.doesNotMatch(onloadSource, /preventDefault|stopPropagation/);
 });
 
 test("TPS Linter follows GCM frontmatter priority without invoking its mutator", () => {
