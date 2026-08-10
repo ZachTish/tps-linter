@@ -21,6 +21,35 @@ export interface ManualSaveShortcutEvent {
   isComposing: boolean;
 }
 
+export interface SaveLintFeedbackRun {
+  explicitAtStart: boolean;
+}
+
+export class SaveLintFeedbackTracker<T> {
+  private readonly pendingExplicit = new Set<T>();
+
+  requestExplicit(item: T): void {
+    this.pendingExplicit.add(item);
+  }
+
+  beginRun(item: T): SaveLintFeedbackRun {
+    return { explicitAtStart: this.pendingExplicit.delete(item) };
+  }
+
+  completeRun(item: T, run: SaveLintFeedbackRun): boolean {
+    const explicitDuringRun = this.pendingExplicit.delete(item);
+    return run.explicitAtStart || explicitDuringRun;
+  }
+
+  requeueRun(item: T, run: SaveLintFeedbackRun): void {
+    if (run.explicitAtStart) this.pendingExplicit.add(item);
+  }
+
+  clear(): void {
+    this.pendingExplicit.clear();
+  }
+}
+
 interface ScheduledTimer {
   handle: unknown;
 }

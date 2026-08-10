@@ -399,7 +399,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
 
     new Setting(parent)
       .setName("Add blank line after frontmatter")
-      .setDesc("Insert one empty line when a valid top-of-note frontmatter block is immediately followed by body content. Existing blank spacing is left to the blank-line rules.")
+      .setDesc("Keep one empty, editable body line after valid top-of-note frontmatter, including metadata-only notes. Existing body spacing is left to the blank-line rules.")
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.ensureBlankLineAfterFrontmatter)

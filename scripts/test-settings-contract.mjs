@@ -24,7 +24,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.6.1",
+    version: "0.6.2",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
@@ -56,6 +56,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.5.8": "1.10.0",
     "0.6.0": "1.10.0",
     "0.6.1": "1.10.0",
+    "0.6.2": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -109,7 +110,7 @@ test("save linting is active-note scoped and keeps automatic filename ownership 
 
   const queueSource = sourceBetween(
     mainSource,
-    "  private queueSaveLint(file: TAbstractFile): void {",
+    "  private queueSaveLint(",
     "  private async lintFileOnSave(file: TFile): Promise<void> {",
   );
   assert.match(queueSource, /this\.settings\.lintOnSave/);
@@ -117,7 +118,14 @@ test("save linting is active-note scoped and keeps automatic filename ownership 
   assert.match(queueSource, /file\.extension !== "md"/);
   assert.match(queueSource, /this\.getActiveEditingView\(file\)/);
   assert.match(queueSource, /inspectPathExclusion\(/);
+  assert.match(queueSource, /if \(requestExplicitFeedback\)/);
+  assert.match(queueSource, /this\.saveLintFeedback\.requestExplicit\(file\)/);
   assert.match(queueSource, /this\.saveLintScheduler\?\.request\(file\)/);
+  assert.ok(
+    queueSource.indexOf("inspectPathExclusion(") <
+      queueSource.indexOf("saveLintFeedback.requestExplicit(file)"),
+    "explicit feedback state must be recorded only after scope and exclusion guards pass",
+  );
 
   const saveSource = sourceBetween(
     mainSource,
@@ -160,12 +168,28 @@ test("save linting is active-note scoped and keeps automatic filename ownership 
   );
   assert.doesNotMatch(saveSource, /createFilenamePlan|createFilenameDecision/);
   assert.doesNotMatch(saveSource, /renameFile/);
-  assert.match(saveSource, /const noticeMessage = formatSaveLintNotice\(result\)/);
-  assert.match(saveSource, /if \(noticeMessage\) new Notice\(noticeMessage, 4000\)/);
+  assert.match(
+    saveSource,
+    /const feedbackRun = this\.saveLintFeedback\.beginRun\(file\)/,
+  );
+  assert.match(saveSource, /this\.saveLintFeedback\.requeueRun\(file, feedbackRun\)/);
+  assert.match(
+    saveSource,
+    /const reportExplicitNoChange\s*=\s*this\.saveLintFeedback\.completeRun\(file, feedbackRun\)[\s\S]*reportExplicitNoChange &&[\s\S]*formatExplicitSaveNoChangeNotice\(preflight\)/,
+  );
+  assert.match(saveSource, /\? formatSaveLintNotice\(result\)/);
+  assert.match(
+    saveSource,
+    /: reportExplicitNoChange\s*\? formatExplicitSaveNoChangeNotice\(result\)\s*:\s*null/,
+  );
+  assert.match(
+    saveSource,
+    /new Notice\(noticeMessage, result\.changed \? 4000 : 3000\)/,
+  );
   assert.ok(
     saveSource.indexOf("await this.app.vault.process(file,") <
       saveSource.indexOf("formatSaveLintNotice(result)"),
-    "save feedback must be emitted only after the atomic process finishes",
+    "changed-result feedback must be emitted only after the atomic process finishes",
   );
 
   assert.match(saveLintSchedulerSource, /rerunRequested/);
@@ -183,6 +207,7 @@ test("save linting is active-note scoped and keeps automatic filename ownership 
     "unload must invalidate in-flight work before disposing queued work",
   );
   assert.match(unloadSource, /this\.stopObservingSaveShortcuts\(doc\)/);
+  assert.match(unloadSource, /this\.saveLintFeedback\.clear\(\)/);
 
   const onloadSource = sourceBetween(
     mainSource,
@@ -204,7 +229,7 @@ test("save linting is active-note scoped and keeps automatic filename ownership 
   assert.match(onloadSource, /isManualSaveShortcut\(event, Platform\.isMacOS\)/);
   assert.match(onloadSource, /view\.containerEl\.doc !== doc/);
   assert.match(onloadSource, /view\.containerEl\.contains\(target\)/);
-  assert.match(onloadSource, /this\.queueSaveLint\(view\.file\)/);
+  assert.match(onloadSource, /this\.queueSaveLint\(view\.file, true\)/);
   assert.match(onloadSource, /\{ capture: true, passive: true \}/);
   assert.doesNotMatch(onloadSource, /preventDefault|stopPropagation/);
 });
@@ -219,7 +244,12 @@ test("TPS Linter follows GCM frontmatter priority without invoking its mutator",
   assert.match(allSource, /Semantic verification failed/);
 });
 
-test("clean always takes a fresh preflight and enters the atomic process path", () => {
+test("manual check and clean use fresh preflights and clean stays atomic", () => {
+  const checkWithNoticeSource = sourceBetween(
+    mainSource,
+    "  private async checkFileWithNotice(",
+    "  private async cleanFileWithNotice(",
+  );
   const inspectionInterfaceSource = sourceBetween(
     mainSource,
     "interface FileInspection {",
@@ -245,6 +275,11 @@ test("clean always takes a fresh preflight and enters the atomic process path", 
     cleanFileSource,
     /const initialInspection = await this\.inspectFile\(\s*file,\s*true,/,
     "Clean must request a fresh Vault.read preflight",
+  );
+  assert.match(
+    checkWithNoticeSource,
+    /const inspection = await this\.inspectFile\(file, true\)/,
+    "Check must inspect fresh persisted bytes rather than a stale cache entry",
   );
   assert.match(
     mainSource,

@@ -1,10 +1,10 @@
 # TPS Linter
 
-TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.6.1` makes the standard Cmd-S/Ctrl-S shortcut lint an already-open note even when Obsidian has no changed bytes to persist, and shows a concise result notice after save lint actually changes content. Every released command, setting, rule, fail-closed guard, protected-Markdown contract, and ownership-safe filename behavior remains available.
+TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.6.2` makes the opt-in after-frontmatter rule create a usable body slot in metadata-only notes, gives an explicit Cmd-S/Ctrl-S a concise no-change result, and makes manual Check read fresh persisted bytes. Every released command, setting, rule, fail-closed guard, protected-Markdown contract, and ownership-safe filename behavior remains available.
 
 ## Install with BRAT
 
-Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.6.1`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
+Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.6.2`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
 
 The released build is validated in the isolated Obsidian Plugin Test Vault. Publishing the release does not install it in the production vault; the production update remains a separate user-owned BRAT pull.
 
@@ -21,7 +21,7 @@ TPS Linter takes inspiration from upstream's consecutive-blank-line, heading-cap
 - The same two actions are available in a Markdown file's context menu and at the top of the settings page.
 - **Lint notes on save** is enabled by default. After Obsidian reports that the active Markdown editor was persisted, or after the standard platform save gesture (Cmd-S on Apple devices and Ctrl-S elsewhere) inside that editor, TPS Linter waits 500 ms, coalesces repeated events, rechecks the live note and editor buffer, and applies enabled content rules when the editor is still active, saved, and eligible.
 
-Save linting is content-only: it never plans or applies a filename change and never turns an external or sync burst into a whole-vault cleanup. A native top-right Obsidian notice briefly lists only changes that were successfully applied. It names at most three cleanup actions, then gives the exact number of remaining fixes, and has a 180-character ceiling. Already-clean, excluded, inactive, unsafe, or self-convergence passes remain silent, so one automatic clean produces one notice rather than a second “already clean” message. There is no startup scan, batch mutation command, paste hook, or inactive-note sweep.
+Save linting is content-only: it never plans or applies a filename change and never turns an external or sync burst into a whole-vault cleanup. A native top-right Obsidian notice briefly lists successfully applied changes. It names at most three cleanup actions, then gives the exact number of remaining fixes, and has a 180-character ceiling. An explicit conventional Cmd-S/Ctrl-S inside the active editor instead reports **no eligible changes**, note-local disablement, or a safety block when it produces no mutation. Routine persisted-modification no-ops and the plugin's own convergence pass remain silent, so one automatic clean never produces a second “already clean” message. Excluded, inactive, preview-only, and unsaved-buffer targets are still skipped without a misleading success notice. There is no startup scan, batch mutation command, paste hook, or inactive-note sweep.
 
 ## Filename rules and ownership
 
@@ -52,7 +52,7 @@ The default Markdown cleanup:
 
 **Add blank line at beginning of note** is a separate default-off rule for notes without frontmatter. It inserts one empty physical first line before nonblank content, reuses the first existing LF, CRLF, or CR ending, and falls back to LF only for a one-line unterminated note. It leaves an existing empty or whitespace-only first line alone and never manufactures content in an empty, BOM-only, or blank-only note. A UTF-8 BOM remains byte zero and the separator follows it. Any exact first-line `---` opener is never displaced—even when its YAML is malformed, unsafe, or unclosed—because Obsidian requires frontmatter to remain on line one.
 
-**Add blank line after frontmatter** remains the independent default-off choice for frontmatter notes. When a safe, closed, top-of-note YAML mapping is immediately followed by body content, it inserts one empty physical line using the closing delimiter's line ending. It leaves existing empty or whitespace-only separator lines alone, does not add padding to frontmatter-only notes, accepts `---` or `...` closers, preserves a leading BOM, and fails closed for malformed, duplicate-key, non-mapping, tagged, anchored, aliased, or otherwise unsafe YAML. With both options enabled, a plain note receives only beginning spacing and a frontmatter note receives only after-frontmatter spacing. Extra separator lines remain owned by **Remove extra blank lines**.
+**Add blank line after frontmatter** remains the independent default-off choice for frontmatter notes. For a safe, closed, top-of-note YAML mapping, it keeps one empty physical separator before existing body content and creates one terminated, editable body slot when the note otherwise ends at frontmatter. It reuses LF, CRLF, or CR, leaves an existing empty or whitespace-only slot alone, accepts `---` or `...` closers, preserves a leading BOM, and fails closed for malformed, duplicate-key, non-mapping, tagged, anchored, aliased, or otherwise unsafe YAML. When **Remove trailing blank lines** is also enabled, excess terminal padding is removed but the one body slot requested by this rule is retained. With both insertion options enabled, a plain note receives only beginning spacing and a frontmatter note receives only after-frontmatter spacing.
 
 When nonblank trailing-whitespace cleanup is enabled, two literal terminal spaces are retained as a Markdown hard break. Optional terminal-blank cleanup removes only unprotected space/tab blank lines and still retains exactly one final newline. Existing UTF-8 BOMs are retained, including before a first-line heading, and rewritten content keeps the note's LF, CRLF, or CR line-ending style.
 
@@ -159,7 +159,7 @@ Bounded-work guards reject notes over 2,000,000 characters or 50,000 physical li
 - Bottom alignment operates on the complete visible ATX outline; a shallow leaf in an uneven tree may remain above H6 to preserve structural relationships.
 - ATX headings prefixed by list or blockquote containers are currently preserved rather than normalized.
 - Protected-block detection is conservative. A malformed or unclosed protected construct remains untouched rather than being guessed at.
-- **Check current note** is advisory and may briefly reflect Obsidian's cached read; **Clean current note** always re-reads and processes the live file. A rare target collision with a same-named folder is caught by Obsidian's guarded rename and reported as a partial result rather than being included in the sibling-file preflight.
+- **Check current note** reads fresh persisted vault bytes but remains a read-only snapshot; it intentionally does not inspect newer, unsaved editor text. **Clean current note** re-reads and processes the live file atomically. A rare target collision with a same-named folder is caught by Obsidian's guarded rename and reported as a partial result rather than being included in the sibling-file preflight.
 - Mobile layout is covered by responsive contract tests and desktop-width inspection; final native iOS interaction remains a separate device check.
 - The conventional Cmd-S/Ctrl-S gesture can lint an unchanged open note because the key gesture is observable. A user-remapped Save command, menu-based no-op Save, or other no-op invocation that emits neither that gesture nor a Vault modification does not create a public Obsidian save event and therefore cannot be detected.
 
@@ -182,6 +182,10 @@ npm run build
 ```
 
 Stable production-mode builds deploy byte-changed `main.js`, `manifest.json`, and `styles.css` only to the isolated test runtime `.obsidian/plugins/tps-linter`. They do not overwrite runtime-owned `data.json`. Direct production deployment is not part of this workflow.
+
+### 0.6.2 validation
+
+Validation covers frontmatter-only body-slot creation with LF, CRLF, CR, BOMs, both closing delimiters, missing and single final endings, whitespace-only EOF, unsafe YAML, note-local controls, idempotence, and precedence over trailing-blank removal. It also covers explicit-save no-change/disabled/safety feedback, silent persisted-modification and self-convergence no-ops, fresh manual Check reads, every existing active-editor and atomic-process guard, TypeScript, the complete declared suite, a separate production build, isolated runtime deployment, and reloaded test-vault QA. Exact final counts, hashes, notices, reload evidence, settings restoration, and QA-note disposition are recorded in `release-notes/0.6.2.md`.
 
 ### 0.6.1 validation
 
@@ -248,6 +252,14 @@ Validation covers safe YAML CST sorting and semantic verification, GCM property-
 Validation covers pure filename planning and collision/ownership guards, TPS filename preservation, exact line-ending and protected-block preservation, idempotence, settings normalization, command and settings contracts, TypeScript, the complete declared suite, a separate final production-mode build, runtime deployment, and a reloaded test-vault UI inspection. Exact final test counts, reload evidence, and artifact hashes are recorded in `release-notes/0.1.0.md`.
 
 ## Version history
+
+### 0.6.2
+
+- Creates and preserves one usable body slot after safe frontmatter-only notes when the existing default-off **Add blank line after frontmatter** rule is enabled.
+- Keeps LF, CRLF, CR, BOM, `---`/`...` closer, YAML safety, note-local control, output-limit, and idempotence guarantees; **Remove trailing blank lines** removes excess padding without erasing the requested slot.
+- Reports **no eligible changes**, note-local disablement, or a safety block after an explicit conventional Save that reaches the worker without changing content; ordinary modify and convergence no-ops remain silent.
+- Makes manual **Check current note** inspect fresh persisted bytes and describes no-op Markdown as clean under the currently enabled rules.
+- Preserves schema v6, every setting/default/exclusion, content-only save ownership, passive shortcut observation, atomic `Vault.process`, and all active-editor/file-revision guards.
 
 ### 0.6.1
 

@@ -94,15 +94,20 @@ test("supports both frontmatter closing delimiters", () => {
 });
 
 test("leaves immediate body content untouched when the option is off", () => {
-  const input = "---\ntitle: Test\n---\nBody\n";
-  const result = cleanMarkdown(input, {
-    ...SPACING_ONLY_OPTIONS,
-    ensureBlankLineAfterFrontmatter: false,
-  });
+  for (const input of [
+    "---\ntitle: Test\n---\nBody\n",
+    "---\ntitle: Test\n---",
+    "---\ntitle: Test\n---\n",
+  ]) {
+    const result = cleanMarkdown(input, {
+      ...SPACING_ONLY_OPTIONS,
+      ensureBlankLineAfterFrontmatter: false,
+    });
 
-  assert.equal(result.output, input);
-  assert.equal(result.changed, false);
-  assert.equal(result.changes.frontmatterBlankLineAdded, false);
+    assert.equal(result.output, input);
+    assert.equal(result.changed, false);
+    assert.equal(result.changes.frontmatterBlankLineAdded, false);
+  }
 });
 
 test("accepts mapping, empty, flow-empty, and comment-only frontmatter", () => {
@@ -147,15 +152,132 @@ test("preserves mixed CR and LF separator bytes while cleaning whitespace", () =
   assert.equal(second.safetyBlockedReason, null);
 });
 
-test("does not manufacture a body for a frontmatter-only note", () => {
-  for (const input of [
-    "---\ntitle: Test\n---",
-    "---\ntitle: Test\n---\n",
-    "---\ntitle: Test\n---\n\n",
-    "---\ntitle: Test\n---\n \t\n",
-  ]) {
-    assertSpacingUnchanged(input);
+test("creates one usable terminal body slot for frontmatter-only notes", () => {
+  for (const [name, ending] of [
+    ["LF", "\n"],
+    ["CRLF", "\r\n"],
+    ["CR", "\r"],
+  ] as const) {
+    for (const closer of ["---", "..."]) {
+      const withoutEnding = `---${ending}title: Test${ending}${closer}`;
+      const withOneEnding = `${withoutEnding}${ending}`;
+      const expected = `${withoutEnding}${ending}${ending}`;
+
+      assertBlankLineAdded(withoutEnding, expected);
+      assertBlankLineAdded(withOneEnding, expected);
+      assertSpacingUnchanged(expected);
+      assert.equal(
+        cleanMarkdown(expected, SPACING_ONLY_OPTIONS).output,
+        expected,
+        `${name} ${closer}`,
+      );
+    }
   }
+});
+
+test("preserves a BOM while creating a terminal body slot with either closer", () => {
+  for (const closer of ["---", "..."]) {
+    const input = `\uFEFF---\r\ntitle: Test\r\n${closer}`;
+    const expected = `${input}\r\n\r\n`;
+
+    assertBlankLineAdded(input, expected);
+    assert.equal(expected.startsWith("\uFEFF"), true);
+    assertSpacingUnchanged(expected);
+  }
+});
+
+test("terminates a whitespace-only EOF slot without overriding whitespace cleanup", () => {
+  const input = "---\ntitle: Test\n---\n \t";
+  const preserved = cleanMarkdown(input, SPACING_ONLY_OPTIONS);
+
+  assert.equal(preserved.output, "---\ntitle: Test\n---\n \t\n");
+  assert.equal(preserved.changed, true);
+  assert.equal(preserved.changes.frontmatterBlankLineAdded, true);
+  assert.equal(preserved.changes.whitespaceOnlyLinesCleaned, 0);
+  assert.equal(
+    cleanMarkdown(preserved.output, SPACING_ONLY_OPTIONS).changed,
+    false,
+  );
+
+  const cleaned = cleanMarkdown(input, {
+    ...SPACING_ONLY_OPTIONS,
+    cleanWhitespaceOnlyLines: true,
+  });
+  assert.equal(cleaned.output, "---\ntitle: Test\n---\n\n");
+  assert.equal(cleaned.changed, true);
+  assert.equal(cleaned.changes.frontmatterBlankLineAdded, true);
+  assert.equal(cleaned.changes.whitespaceOnlyLinesCleaned, 1);
+  assert.equal(
+    cleanMarkdown(cleaned.output, {
+      ...SPACING_ONLY_OPTIONS,
+      cleanWhitespaceOnlyLines: true,
+    }).changed,
+    false,
+  );
+});
+
+test("preserves a terminal slot when CR and cleaned whitespace LF would merge", () => {
+  const input = "---\n---\r \t\n";
+  for (const collapseConsecutiveBlankLines of [false, true]) {
+    for (const removeTrailingBlankLines of [false, true]) {
+      const options: MarkdownCleanupOptions = {
+        ...SPACING_ONLY_OPTIONS,
+        cleanWhitespaceOnlyLines: true,
+        collapseConsecutiveBlankLines,
+        removeTrailingBlankLines,
+      };
+      const expected =
+        collapseConsecutiveBlankLines || removeTrailingBlankLines
+          ? "---\n---\r\r"
+          : "---\n---\r\r\n";
+      const first = cleanMarkdown(input, options);
+
+      assert.equal(first.output, expected);
+      assert.equal(first.changed, true);
+      assert.equal(first.changes.frontmatterBlankLineAdded, true);
+      assert.equal(first.changes.whitespaceOnlyLinesCleaned, 1);
+      assert.equal(
+        first.changes.extraBlankLinesRemoved,
+        collapseConsecutiveBlankLines ? 1 : 0,
+      );
+      assert.equal(
+        first.changes.trailingBlankLinesRemoved,
+        !collapseConsecutiveBlankLines && removeTrailingBlankLines ? 1 : 0,
+      );
+      assert.equal(first.safetyBlockedReason, null);
+
+      const second = cleanMarkdown(first.output, options);
+      assert.equal(second.output, expected);
+      assert.equal(second.changed, false);
+      assert.equal(second.safetyBlockedReason, null);
+    }
+  }
+});
+
+test("terminal blank cleanup preserves the requested slot and removes excess", () => {
+  const options: MarkdownCleanupOptions = {
+    ...SPACING_ONLY_OPTIONS,
+    removeTrailingBlankLines: true,
+  };
+  const withoutSlot = "---\ntitle: Test\n---";
+  const expected = "---\ntitle: Test\n---\n\n";
+  const added = cleanMarkdown(withoutSlot, options);
+
+  assert.equal(added.output, expected);
+  assert.equal(added.changed, true);
+  assert.equal(added.changes.frontmatterBlankLineAdded, true);
+  assert.equal(added.changes.trailingBlankLinesRemoved, 0);
+  assert.equal(cleanMarkdown(expected, options).changed, false);
+
+  const excess = cleanMarkdown(
+    "---\ntitle: Test\n---\n\n\n\n",
+    options,
+  );
+  assert.equal(excess.output, expected);
+  assert.equal(excess.changed, true);
+  assert.equal(excess.changes.frontmatterBlankLineAdded, false);
+  assert.equal(excess.changes.trailingBlankLinesRemoved, 2);
+  assert.equal(cleanMarkdown(excess.output, options).changed, false);
 });
 
 test("fails closed for absent, displaced, unclosed, or unsafe frontmatter", () => {
@@ -171,43 +293,51 @@ test("fails closed for absent, displaced, unclosed, or unsafe frontmatter", () =
     "---\n1: numeric key\n---\nBody\n",
     "---\nvalue: &shared one\nother: *shared\n---\nBody\n",
     "---\nvalue: !custom one\n---\nBody\n",
+    "---\nvalue: [unterminated\n---",
+    "---\nsame: one\nsame: two\n---\n",
+    "---\nvalue: &shared one\nother: *shared\n---",
+    "\uFEFF---\r\nvalue: !custom one\r\n...",
   ]) {
     assertSpacingUnchanged(input);
   }
 });
 
 test("the note-local frontmatter-blank-line rule ID disables only this rule", () => {
-  const input = [
-    "---\n",
-    "title: Test\n",
-    "tps-linter-disabled-rules: frontmatter-blank-line\n",
-    "---\n",
-    "Body\n",
-  ].join("");
-  const result = cleanMarkdown(input, SPACING_ONLY_OPTIONS);
+  for (const suffix of ["", "\nBody\n"]) {
+    const input = [
+      "---\n",
+      "title: Test\n",
+      "tps-linter-disabled-rules: frontmatter-blank-line\n",
+      "---",
+      suffix,
+    ].join("");
+    const result = cleanMarkdown(input, SPACING_ONLY_OPTIONS);
 
-  assert.equal(result.output, input);
-  assert.equal(result.changed, false);
-  assert.equal(result.changes.frontmatterBlankLineAdded, false);
-  assert.deepEqual(result.disabledRules, ["frontmatter-blank-line"]);
-  assert.equal(result.noteDisabledReason, null);
-  assert.equal(result.safetyBlockedReason, null);
+    assert.equal(result.output, input);
+    assert.equal(result.changed, false);
+    assert.equal(result.changes.frontmatterBlankLineAdded, false);
+    assert.deepEqual(result.disabledRules, ["frontmatter-blank-line"]);
+    assert.equal(result.noteDisabledReason, null);
+    assert.equal(result.safetyBlockedReason, null);
+  }
 });
 
 test("a note-wide local control also prevents frontmatter spacing", () => {
-  const input = [
-    "---\n",
-    "title: Test\n",
-    "tps-linter: false\n",
-    "---\n",
-    "Body\n",
-  ].join("");
-  const result = cleanMarkdown(input, SPACING_ONLY_OPTIONS);
+  for (const suffix of ["", "\nBody\n"]) {
+    const input = [
+      "---\n",
+      "title: Test\n",
+      "tps-linter: false\n",
+      "---",
+      suffix,
+    ].join("");
+    const result = cleanMarkdown(input, SPACING_ONLY_OPTIONS);
 
-  assert.equal(result.output, input);
-  assert.equal(result.changed, false);
-  assert.equal(result.changes.frontmatterBlankLineAdded, false);
-  assert.match(result.noteDisabledReason ?? "", /tps-linter: false/);
+    assert.equal(result.output, input);
+    assert.equal(result.changed, false);
+    assert.equal(result.changes.frontmatterBlankLineAdded, false);
+    assert.match(result.noteDisabledReason ?? "", /tps-linter: false/);
+  }
 });
 
 test("composes atomically with frontmatter sorting, blank collapse, and final newline", () => {

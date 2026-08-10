@@ -46,11 +46,15 @@ import {
 import { TPSLinterSettingTab } from "./settings-tab";
 import {
   SaveLintLifecycle,
+  SaveLintFeedbackTracker,
   SaveLintScheduler,
   editorContentMatchesFile,
   isManualSaveShortcut,
 } from "./save-lint-scheduler";
-import { formatSaveLintNotice } from "./save-lint-feedback";
+import {
+  formatExplicitSaveNoChangeNotice,
+  formatSaveLintNotice,
+} from "./save-lint-feedback";
 import { isCurrentMarkdownFile } from "./vault-file-identity";
 
 type CleanupTrigger = "command" | "file-menu" | "settings";
@@ -79,6 +83,7 @@ interface CleanResult {
 export default class TPSLinterPlugin extends Plugin {
   settings!: TPSLinterSettings;
   private readonly activeCleans = new WeakSet<TFile>();
+  private readonly saveLintFeedback = new SaveLintFeedbackTracker<TFile>();
   private readonly saveShortcutObservers = new Map<Document, Component>();
   private readonly saveLintLifecycle = new SaveLintLifecycle();
   private saveLintScheduler: SaveLintScheduler<TFile> | null = null;
@@ -211,7 +216,7 @@ export default class TPSLinterPlugin extends Plugin {
           return;
         }
 
-        this.queueSaveLint(view.file);
+        this.queueSaveLint(view.file, true);
       },
       { capture: true, passive: true },
     );
@@ -228,6 +233,7 @@ export default class TPSLinterPlugin extends Plugin {
     this.saveLintLifecycle.invalidate();
     this.saveLintScheduler?.dispose();
     this.saveLintScheduler = null;
+    this.saveLintFeedback.clear();
     for (const doc of [...this.saveShortcutObservers.keys()]) {
       this.stopObservingSaveShortcuts(doc);
     }
@@ -244,11 +250,15 @@ export default class TPSLinterPlugin extends Plugin {
     setDiagnosticsEnabled(this.settings.diagnostics);
     if (!this.settings.lintOnSave) {
       this.saveLintScheduler?.cancelPending();
+      this.saveLintFeedback.clear();
     }
     await this.saveData(this.settings);
   }
 
-  private queueSaveLint(file: TAbstractFile): void {
+  private queueSaveLint(
+    file: TAbstractFile,
+    requestExplicitFeedback = false,
+  ): void {
     if (
       !this.saveLintLifecycle.isActive() ||
       !this.settings.lintOnSave ||
@@ -274,10 +284,14 @@ export default class TPSLinterPlugin extends Plugin {
       );
       return;
     }
+    if (requestExplicitFeedback) {
+      this.saveLintFeedback.requestExplicit(file);
+    }
     this.saveLintScheduler?.request(file);
   }
 
   private async lintFileOnSave(file: TFile): Promise<void> {
+    const feedbackRun = this.saveLintFeedback.beginRun(file);
     const lifecycleGeneration = this.saveLintLifecycle.capture();
     if (
       !this.saveLintLifecycle.isCurrent(lifecycleGeneration) ||
@@ -315,6 +329,7 @@ export default class TPSLinterPlugin extends Plugin {
     }
 
     if (this.activeCleans.has(file)) {
+      this.saveLintFeedback.requeueRun(file, feedbackRun);
       this.saveLintScheduler?.request(file);
       return;
     }
@@ -357,11 +372,21 @@ export default class TPSLinterPlugin extends Plugin {
         JSON.stringify(preflightOptions);
       const preflight = cleanMarkdown(freshContent, preflightOptions);
       if (!preflight.changed) {
+        const reportExplicitNoChange =
+          this.saveLintFeedback.completeRun(file, feedbackRun);
         logDiagnostic(
           "save",
           file.path,
           this.describeMarkdown(preflight, false),
         );
+        if (
+          reportExplicitNoChange &&
+          this.saveLintLifecycle.isCurrent(lifecycleGeneration)
+        ) {
+          const noticeMessage =
+            formatExplicitSaveNoChangeNotice(preflight);
+          if (noticeMessage) new Notice(noticeMessage, 3000);
+        }
         return;
       }
 
@@ -425,8 +450,16 @@ export default class TPSLinterPlugin extends Plugin {
         this.describeMarkdown(result, result.changed),
       );
       if (this.saveLintLifecycle.isCurrent(lifecycleGeneration)) {
-        const noticeMessage = formatSaveLintNotice(result);
-        if (noticeMessage) new Notice(noticeMessage, 4000);
+        const reportExplicitNoChange =
+          this.saveLintFeedback.completeRun(file, feedbackRun);
+        const noticeMessage = result.changed
+          ? formatSaveLintNotice(result)
+          : reportExplicitNoChange
+            ? formatExplicitSaveNoChangeNotice(result)
+            : null;
+        if (noticeMessage) {
+          new Notice(noticeMessage, result.changed ? 4000 : 3000);
+        }
       }
     } finally {
       this.activeCleans.delete(file);
@@ -501,7 +534,7 @@ export default class TPSLinterPlugin extends Plugin {
         );
       }
 
-      const inspection = await this.inspectFile(file);
+      const inspection = await this.inspectFile(file, true);
       const summary = this.describeInspection(inspection, false);
       return this.finish(trigger, file.path, summary, notify);
     } catch (error) {
@@ -942,7 +975,7 @@ export default class TPSLinterPlugin extends Plugin {
     if (!result.changed) {
       const summary = skippedReason
         ? `Markdown is unchanged. Frontmatter sorting was skipped because ${skippedReason}.`
-        : "Markdown is already clean.";
+        : "Markdown is already clean under the enabled rules.";
       return `${summary}${disabledRules}`;
     }
 

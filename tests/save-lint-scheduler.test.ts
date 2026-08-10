@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   SaveLintLifecycle,
+  SaveLintFeedbackTracker,
   SaveLintScheduler,
   editorContentMatchesFile,
   editorContentNeedsNormalization,
@@ -158,6 +159,56 @@ test("lifecycle generations invalidate in-flight work across unload and reactiva
   assert.equal(lifecycle.isCurrent(firstGeneration), false);
   assert.equal(lifecycle.isCurrent(secondGeneration), true);
   assert.notEqual(secondGeneration, firstGeneration);
+});
+
+test("save feedback tracker absorbs an explicit request into the run that finishes it", () => {
+  const tracker = new SaveLintFeedbackTracker<string>();
+
+  const ordinaryRun = tracker.beginRun("note");
+  assert.equal(ordinaryRun.explicitAtStart, false);
+  tracker.requestExplicit("note");
+  assert.equal(tracker.completeRun("note", ordinaryRun), true);
+  assert.equal(tracker.beginRun("note").explicitAtStart, false);
+
+  tracker.requestExplicit("note");
+  const explicitRun = tracker.beginRun("note");
+  assert.equal(explicitRun.explicitAtStart, true);
+  tracker.requeueRun("note", explicitRun);
+  assert.equal(tracker.beginRun("note").explicitAtStart, true);
+
+  tracker.requestExplicit("note");
+  tracker.clear();
+  assert.equal(tracker.beginRun("note").explicitAtStart, false);
+});
+
+test("explicit save during a dirty run does not notify its clean rerun", async () => {
+  const firstRun = deferred();
+  const feedback = new SaveLintFeedbackTracker<string>();
+  const notices: string[] = [];
+  let runs = 0;
+  const scheduler = new SaveLintScheduler<string>(
+    async (item) => {
+      const feedbackRun = feedback.beginRun(item);
+      runs += 1;
+      const changed = runs === 1;
+      if (changed) await firstRun.promise;
+      const explicitResult = feedback.completeRun(item, feedbackRun);
+      if (changed) notices.push("changed");
+      else if (explicitResult) notices.push("no eligible changes");
+    },
+    { delayMs: 5 },
+  );
+
+  scheduler.request("note");
+  await waitFor(() => runs === 1, "dirty worker should start");
+  feedback.requestExplicit("note");
+  scheduler.request("note");
+  firstRun.resolve();
+
+  await waitFor(() => runs === 2, "convergence rerun should start");
+  await sleep(15);
+  assert.deepEqual(notices, ["changed"]);
+  scheduler.dispose();
 });
 
 test("coalesces repeated requests independently per item", async () => {

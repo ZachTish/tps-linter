@@ -6,7 +6,10 @@ import {
   type MarkdownCleanupOptions,
   type MarkdownCleanupResult,
 } from "../src/cleaner.ts";
-import { formatSaveLintNotice } from "../src/save-lint-feedback.ts";
+import {
+  formatExplicitSaveNoChangeNotice,
+  formatSaveLintNotice,
+} from "../src/save-lint-feedback.ts";
 
 const OPTIONS: MarkdownCleanupOptions = {
   cleanWhitespaceOnlyLines: true,
@@ -42,6 +45,46 @@ test("save feedback stays silent for the convergent self-triggered rerun", () =>
   assert.equal(formatSaveLintNotice(first), "TPS Linter: removed 1 extra blank line.");
   assert.equal(second.changed, false);
   assert.equal(formatSaveLintNotice(second), null);
+  assert.equal(
+    formatExplicitSaveNoChangeNotice(second),
+    "TPS Linter: no eligible changes.",
+  );
+});
+
+test("explicit-save no-change feedback distinguishes disabled and blocked notes", () => {
+  const clean = cleanMarkdown("Body\n", OPTIONS);
+  assert.equal(
+    formatExplicitSaveNoChangeNotice(clean),
+    "TPS Linter: no eligible changes.",
+  );
+  assert.equal(
+    formatExplicitSaveNoChangeNotice({
+      ...clean,
+      noteDisabledReason: "tps-linter: false",
+    }),
+    "TPS Linter: skipped because this note disables cleanup.",
+  );
+  assert.equal(
+    formatExplicitSaveNoChangeNotice({
+      ...clean,
+      safetyBlockedReason: "a line is too long",
+    }),
+    "TPS Linter: skipped by the safety verifier.",
+  );
+  assert.equal(
+    formatExplicitSaveNoChangeNotice({
+      ...clean,
+      changes: {
+        ...clean.changes,
+        frontmatterSortSkippedReason: "Duplicate top-level key",
+      },
+    }),
+    "TPS Linter: no changes; frontmatter sorting was skipped for safety.",
+  );
+  assert.equal(
+    formatExplicitSaveNoChangeNotice({ ...clean, changed: true }),
+    null,
+  );
 });
 
 test("save feedback uses a bounded fallback for an unclassified change", () => {

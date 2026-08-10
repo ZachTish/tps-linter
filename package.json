@@ -1,6 +1,6 @@
 {
   "name": "tps-linter",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "TPS-specific note and filename cleanup for Obsidian.",
   "main": "main.js",
   "type": "module",

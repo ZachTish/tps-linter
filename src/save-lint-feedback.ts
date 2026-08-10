@@ -78,6 +78,22 @@ export function formatSaveLintNotice(
   return `TPS Linter: applied ${totalFixes} ${plural("fix", totalFixes)} across ${actions.length} ${plural("rule", actions.length)}.`;
 }
 
+export function formatExplicitSaveNoChangeNotice(
+  result: MarkdownCleanupResult,
+): string | null {
+  if (result.changed) return null;
+  if (result.noteDisabledReason) {
+    return "TPS Linter: skipped because this note disables cleanup.";
+  }
+  if (result.safetyBlockedReason) {
+    return "TPS Linter: skipped by the safety verifier.";
+  }
+  if (result.changes.frontmatterSortSkippedReason) {
+    return "TPS Linter: no changes; frontmatter sorting was skipped for safety.";
+  }
+  return "TPS Linter: no eligible changes.";
+}
+
 function plural(word: string, count: number): string {
   if (count === 1) return word;
   return word === "fix" ? "fixes" : `${word}s`;

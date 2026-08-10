@@ -586,6 +586,7 @@ function cleanMarkdownOnce(
   };
 
   let workingInput = input;
+  let preserveTerminalFrontmatterBodySlot = false;
   if (options.sortFrontmatterFields) {
     const frontmatter = sortDocumentFrontmatter(
       workingInput,
@@ -603,6 +604,8 @@ function cleanMarkdownOnce(
     );
     workingInput = spacing.output;
     changes.frontmatterBlankLineAdded = spacing.added;
+    preserveTerminalFrontmatterBodySlot =
+      spacing.preserveTerminalBodySlot === true;
   }
 
   if (options.ensureBlankLineAtBeginning) {
@@ -889,6 +892,12 @@ function cleanMarkdownOnce(
       !retainedTokens.at(-1)?.protected &&
       /^[ \t]*$/.test(retainedTokens.at(-1)?.body ?? "")
     ) {
+      if (
+        preserveTerminalFrontmatterBodySlot &&
+        retainedTokens.at(-2)?.protected
+      ) {
+        break;
+      }
       retainedTokens.pop();
       changes.trailingBlankLinesRemoved += 1;
     }
@@ -1082,6 +1091,7 @@ interface DocumentFrontmatterSortResult {
 interface FrontmatterSpacingResult {
   output: string;
   added: boolean;
+  preserveTerminalBodySlot?: boolean;
 }
 
 function addBlankLineAtBeginning(input: string): FrontmatterSpacingResult {
@@ -1128,23 +1138,7 @@ function addBlankLineAfterFrontmatter(
       index > 0 && /^(?:---|\.\.\.)[ \t]*$/.test(token.body),
   );
   const closing = tokens[closingIndex];
-  const firstBody = tokens[closingIndex + 1];
-  const firstBodyIsWhitespaceOnly =
-    firstBody !== undefined && /^[ \t]*$/.test(firstBody.body);
-  const cleanedSeparatorWouldMergeWithClosing =
-    firstBody !== undefined &&
-    firstBody.body.length > 0 &&
-    firstBodyIsWhitespaceOnly &&
-    cleanWhitespaceOnlyLines &&
-    closing?.ending === "\r" &&
-    firstBody.ending === "\n";
-  if (
-    closingIndex < 0 ||
-    !closing ||
-    closing.ending === "" ||
-    !firstBody ||
-    (firstBodyIsWhitespaceOnly && !cleanedSeparatorWouldMergeWithClosing)
-  ) {
+  if (closingIndex < 0 || !closing) {
     return { output: input, added: false };
   }
 
@@ -1153,6 +1147,61 @@ function addBlankLineAfterFrontmatter(
     .map((token) => `${token.body}${token.ending}`)
     .join("");
   if (inspectTopLevelFrontmatterSafety(frontmatterBody) !== null) {
+    return { output: input, added: false };
+  }
+
+  const bodyTokens = tokens.slice(closingIndex + 1);
+  const hasNonblankBody = bodyTokens.some(
+    (token) => !/^[ \t]*$/.test(token.body),
+  );
+  const firstBody = tokens[closingIndex + 1];
+  const firstBodyIsWhitespaceOnly =
+    firstBody !== undefined && /^[ \t]*$/.test(firstBody.body);
+  const cleanedSeparatorWouldMergeWithClosing =
+    firstBody !== undefined &&
+    firstBody.body.length > 0 &&
+    firstBodyIsWhitespaceOnly &&
+    cleanWhitespaceOnlyLines &&
+    closing.ending === "\r" &&
+    firstBody.ending === "\n";
+  if (!hasNonblankBody) {
+    if (cleanedSeparatorWouldMergeWithClosing) {
+      const output = [
+        ...tokens.slice(0, closingIndex + 1),
+        { body: "", ending: closing.ending },
+        ...tokens.slice(closingIndex + 1),
+      ]
+        .map((token) => `${token.body}${token.ending}`)
+        .join("");
+      return {
+        output,
+        added: true,
+        preserveTerminalBodySlot: true,
+      };
+    }
+
+    const lineEnding = closing.ending || preferredLineEnding(tokens);
+    const hasTerminatedBodySlot = bodyTokens.some(
+      (token) => token.ending !== "",
+    );
+    const missingEndings =
+      closing.ending === ""
+        ? `${lineEnding}${lineEnding}`
+        : hasTerminatedBodySlot
+          ? ""
+          : lineEnding;
+    return {
+      output: `${input}${missingEndings}`,
+      added: missingEndings.length > 0,
+      preserveTerminalBodySlot: true,
+    };
+  }
+
+  if (
+    closing.ending === "" ||
+    !firstBody ||
+    (firstBodyIsWhitespaceOnly && !cleanedSeparatorWouldMergeWithClosing)
+  ) {
     return { output: input, added: false };
   }
 
