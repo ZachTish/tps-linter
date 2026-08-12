@@ -39,6 +39,11 @@ import {
   summarizeError,
 } from "./logger";
 import {
+  describeRelevantOptInRules,
+  findRelevantDisabledOptInRules,
+  type RelevantOptInRule,
+} from "./opt-in-suggestions";
+import {
   normalizeSettings,
   resolveFrontmatterPriorityKeys,
   type TPSLinterSettings,
@@ -66,6 +71,7 @@ interface FileInspection {
   filenameDecision: FilenameRenameDecision;
   lintControls: LintControlResult;
   markdown: MarkdownCleanupResult;
+  relevantDisabledOptInRules?: readonly RelevantOptInRule[];
 }
 
 interface SourceFileInspection extends FileInspection {
@@ -374,6 +380,13 @@ export default class TPSLinterPlugin extends Plugin {
       if (!preflight.changed) {
         const reportExplicitNoChange =
           this.saveLintFeedback.completeRun(file, feedbackRun);
+        const relevantDisabledRules = reportExplicitNoChange
+          ? findRelevantDisabledOptInRules(
+              freshContent,
+              preflightOptions,
+              preflight,
+            )
+          : [];
         logDiagnostic(
           "save",
           file.path,
@@ -384,13 +397,17 @@ export default class TPSLinterPlugin extends Plugin {
           this.saveLintLifecycle.isCurrent(lifecycleGeneration)
         ) {
           const noticeMessage =
-            formatExplicitSaveNoChangeNotice(preflight);
+            formatExplicitSaveNoChangeNotice(
+              preflight,
+              relevantDisabledRules,
+            );
           if (noticeMessage) new Notice(noticeMessage, 3000);
         }
         return;
       }
 
       let result = preflight;
+      let resultOptions = preflightOptions;
       let guardReason: string | null = null;
       await this.app.vault.process(file, (currentContent) => {
         const processView = this.getActiveEditingView(file);
@@ -428,6 +445,7 @@ export default class TPSLinterPlugin extends Plugin {
         }
 
         const processOptions = this.markdownOptions();
+        resultOptions = processOptions;
         result =
           currentContent === freshContent &&
           JSON.stringify(processOptions) === preflightOptionsFingerprint
@@ -455,7 +473,14 @@ export default class TPSLinterPlugin extends Plugin {
         const noticeMessage = result.changed
           ? formatSaveLintNotice(result)
           : reportExplicitNoChange
-            ? formatExplicitSaveNoChangeNotice(result)
+            ? formatExplicitSaveNoChangeNotice(
+                result,
+                findRelevantDisabledOptInRules(
+                  result.output,
+                  resultOptions,
+                  result,
+                ),
+              )
             : null;
         if (noticeMessage) {
           new Notice(noticeMessage, result.changed ? 4000 : 3000);
@@ -534,7 +559,7 @@ export default class TPSLinterPlugin extends Plugin {
         );
       }
 
-      const inspection = await this.inspectFile(file, true);
+      const inspection = await this.inspectFile(file, true, true);
       const summary = this.describeInspection(inspection, false);
       return this.finish(trigger, file.path, summary, notify);
     } catch (error) {
@@ -584,6 +609,7 @@ export default class TPSLinterPlugin extends Plugin {
   private async inspectFile(
     file: TFile,
     readFresh = false,
+    includeOptInSuggestions = false,
     markdownOptions = this.markdownOptions(),
     filenameOptions = this.filenameOptions(),
     filenameCleaningEnabled = this.settings.cleanFilenames,
@@ -609,6 +635,14 @@ export default class TPSLinterPlugin extends Plugin {
       filenameCleaningEnabled,
     );
     const markdown = analysis.markdown;
+    const relevantDisabledOptInRules =
+      includeOptInSuggestions && !markdown.changed
+        ? findRelevantDisabledOptInRules(
+            content,
+            markdownOptions,
+            markdown,
+          )
+        : [];
 
     return {
       file: liveFile,
@@ -617,6 +651,7 @@ export default class TPSLinterPlugin extends Plugin {
       filenameDecision,
       lintControls,
       markdown,
+      relevantDisabledOptInRules,
     };
   }
 
@@ -628,6 +663,7 @@ export default class TPSLinterPlugin extends Plugin {
     const initialInspection = await this.inspectFile(
       file,
       true,
+      false,
       markdownOptions,
       filenameOptions,
       filenameCleaningEnabled,
@@ -790,6 +826,14 @@ export default class TPSLinterPlugin extends Plugin {
       );
     }
 
+    const relevantDisabledOptInRules = contentChanged
+      ? []
+      : findRelevantDisabledOptInRules(
+          currentMarkdown.output,
+          markdownOptions,
+          currentMarkdown,
+        );
+
     return {
       inspection: {
         file: liveFile,
@@ -797,6 +841,7 @@ export default class TPSLinterPlugin extends Plugin {
         filenameDecision,
         lintControls,
         markdown: currentMarkdown,
+        relevantDisabledOptInRules,
       },
       contentChanged,
       filenameChanged,
@@ -858,6 +903,8 @@ export default class TPSLinterPlugin extends Plugin {
       cleanWhitespaceOnlyLines: this.settings.cleanWhitespaceOnlyLines,
       collapseConsecutiveBlankLines:
         this.settings.collapseConsecutiveBlankLines,
+      removeBlankLinesBetweenListItems:
+        this.settings.removeBlankLinesBetweenListItems,
       trimNonblankTrailingWhitespace:
         this.settings.trimNonblankTrailingWhitespace,
       removeTrailingBlankLines: this.settings.removeTrailingBlankLines,
@@ -887,7 +934,27 @@ export default class TPSLinterPlugin extends Plugin {
         applied,
       ),
       this.describeMarkdown(inspection.markdown, applied),
-    ].join(" ");
+      this.describeRelevantDisabledRules(
+        inspection.markdown,
+        inspection.relevantDisabledOptInRules ?? [],
+      ),
+    ].filter((part) => part.length > 0).join(" ");
+  }
+
+  private describeRelevantDisabledRules(
+    result: MarkdownCleanupResult,
+    rules: readonly RelevantOptInRule[],
+  ): string {
+    if (
+      result.changed ||
+      result.noteDisabledReason ||
+      result.safetyBlockedReason ||
+      rules.length === 0
+    ) {
+      return "";
+    }
+    const labels = describeRelevantOptInRules(rules);
+    return `Optional fixes off on this device: ${labels}.`;
   }
 
   private describeCleanResult(result: CleanResult): string {
@@ -906,7 +973,13 @@ export default class TPSLinterPlugin extends Plugin {
       result.inspection.markdown,
       result.contentChanged,
     );
-    return `${filename} ${markdown}`;
+    const optionalFixes = this.describeRelevantDisabledRules(
+      result.inspection.markdown,
+      result.inspection.relevantDisabledOptInRules ?? [],
+    );
+    return [filename, markdown, optionalFixes]
+      .filter((part) => part.length > 0)
+      .join(" ");
   }
 
   private describeFilename(
@@ -982,6 +1055,8 @@ export default class TPSLinterPlugin extends Plugin {
     const actions: string[] = [];
     const whitespaceLines = result.changes.whitespaceOnlyLinesCleaned;
     const blankLines = result.changes.extraBlankLinesRemoved;
+    const listItemBlankLines =
+      result.changes.listItemBlankLinesRemoved;
     const trailingLines =
       result.changes.nonblankTrailingWhitespaceLinesCleaned;
     const trailingBlankLines =
@@ -997,6 +1072,11 @@ export default class TPSLinterPlugin extends Plugin {
     if (blankLines > 0) {
       actions.push(
         `${applied ? "removed" : "remove"} ${blankLines} extra blank ${plural("line", blankLines)}`,
+      );
+    }
+    if (listItemBlankLines > 0) {
+      actions.push(
+        `${applied ? "removed" : "remove"} ${listItemBlankLines} blank ${plural("line", listItemBlankLines)} between list items`,
       );
     }
     if (trailingLines > 0) {

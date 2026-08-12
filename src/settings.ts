@@ -1,4 +1,4 @@
-export const SETTINGS_SCHEMA_VERSION = 6 as const;
+export const SETTINGS_SCHEMA_VERSION = 7 as const;
 
 export type FilenameUnsafeCharacterStyle = "space" | "dash" | "remove";
 export type HeadingCapitalizationStyle =
@@ -15,6 +15,7 @@ export interface TPSLinterSettings {
   removeObsidianLinkCharacters: boolean;
   cleanWhitespaceOnlyLines: boolean;
   collapseConsecutiveBlankLines: boolean;
+  removeBlankLinesBetweenListItems: boolean;
   trimNonblankTrailingWhitespace: boolean;
   removeTrailingBlankLines: boolean;
   ensureFinalNewline: boolean;
@@ -61,6 +62,7 @@ export const DEFAULT_SETTINGS: ReadonlyTPSLinterSettings = Object.freeze({
   removeObsidianLinkCharacters: false,
   cleanWhitespaceOnlyLines: true,
   collapseConsecutiveBlankLines: true,
+  removeBlankLinesBetweenListItems: false,
   trimNonblankTrailingWhitespace: false,
   removeTrailingBlankLines: false,
   ensureFinalNewline: true,
@@ -123,6 +125,10 @@ export function normalizeSettings(loadedData: unknown): TPSLinterSettings {
     collapseConsecutiveBlankLines: readBoolean(
       data.collapseConsecutiveBlankLines,
       DEFAULT_SETTINGS.collapseConsecutiveBlankLines,
+    ),
+    removeBlankLinesBetweenListItems: readBoolean(
+      data.removeBlankLinesBetweenListItems,
+      DEFAULT_SETTINGS.removeBlankLinesBetweenListItems,
     ),
     trimNonblankTrailingWhitespace: readBoolean(
       data.trimNonblankTrailingWhitespace,

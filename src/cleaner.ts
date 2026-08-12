@@ -53,6 +53,7 @@ export interface FilenameRenameDecision {
 export interface MarkdownCleanupOptions {
   cleanWhitespaceOnlyLines: boolean;
   collapseConsecutiveBlankLines: boolean;
+  removeBlankLinesBetweenListItems: boolean;
   trimNonblankTrailingWhitespace: boolean;
   removeTrailingBlankLines: boolean;
   ensureFinalNewline: boolean;
@@ -69,6 +70,7 @@ export interface MarkdownCleanupOptions {
 export interface MarkdownCleanupChanges {
   whitespaceOnlyLinesCleaned: number;
   extraBlankLinesRemoved: number;
+  listItemBlankLinesRemoved: number;
   nonblankTrailingWhitespaceLinesCleaned: number;
   trailingBlankLinesRemoved: number;
   headingsCapitalized: number;
@@ -107,6 +109,13 @@ interface LineToken {
 interface ProcessedLineToken extends LineToken {
   protected: boolean;
   headingIndex?: number;
+}
+
+interface ListItemSignature {
+  containerPath: ContainerStep[];
+  markerIndent: number;
+  markerClass: string;
+  orderedNumber: number | null;
 }
 
 interface FenceState {
@@ -574,6 +583,7 @@ function cleanMarkdownOnce(
   const changes: MarkdownCleanupChanges = {
     whitespaceOnlyLinesCleaned: 0,
     extraBlankLinesRemoved: 0,
+    listItemBlankLinesRemoved: 0,
     nonblankTrailingWhitespaceLinesCleaned: 0,
     trailingBlankLinesRemoved: 0,
     headingsCapitalized: 0,
@@ -815,19 +825,7 @@ function cleanMarkdownOnce(
       continue;
     }
 
-    const whitespaceComparisonBody =
-      index === 0 && options.ensureBlankLineAtBeginning
-        ? comparisonBody
-        : token.body;
     if (
-      options.cleanWhitespaceOnlyLines &&
-      /^[ \t]+$/.test(whitespaceComparisonBody)
-    ) {
-      token.body = index === 0 && token.body.startsWith("\uFEFF")
-        ? "\uFEFF"
-        : "";
-      changes.whitespaceOnlyLinesCleaned += 1;
-    } else if (
       options.trimNonblankTrailingWhitespace &&
       token.body.trim().length > 0
     ) {
@@ -863,10 +861,31 @@ function cleanMarkdownOnce(
     }
   }
 
+  const listCompaction = options.removeBlankLinesBetweenListItems
+    ? compactListItemBlankLines(processedTokens)
+    : { tokens: processedTokens, removed: 0 };
+  changes.listItemBlankLinesRemoved = listCompaction.removed;
+
+  for (let index = 0; index < listCompaction.tokens.length; index += 1) {
+    const token = listCompaction.tokens[index];
+    if (!token || token.protected || !options.cleanWhitespaceOnlyLines) {
+      continue;
+    }
+    const whitespaceComparisonBody =
+      index === 0 && options.ensureBlankLineAtBeginning
+        ? token.body.replace(/^\uFEFF/, "")
+        : token.body;
+    if (!/^[ \t]+$/.test(whitespaceComparisonBody)) continue;
+    token.body = index === 0 && token.body.startsWith("\uFEFF")
+      ? "\uFEFF"
+      : "";
+    changes.whitespaceOnlyLinesCleaned += 1;
+  }
+
   const retainedTokens: ProcessedLineToken[] = [];
   let previousWasCollapsibleBlank = false;
-  for (let index = 0; index < processedTokens.length; index += 1) {
-    const token = processedTokens[index];
+  for (let index = 0; index < listCompaction.tokens.length; index += 1) {
+    const token = listCompaction.tokens[index];
     if (!token) continue;
     const blankBody = index === 0 && options.ensureBlankLineAtBeginning
       ? token.body.replace(/^\uFEFF/, "")
@@ -950,6 +969,9 @@ function applyDisabledRules(
     collapseConsecutiveBlankLines:
       options.collapseConsecutiveBlankLines &&
       !disabledRules.has("blank-lines"),
+    removeBlankLinesBetweenListItems:
+      options.removeBlankLinesBetweenListItems &&
+      !disabledRules.has("list-item-blank-lines"),
     trimNonblankTrailingWhitespace:
       options.trimNonblankTrailingWhitespace &&
       !disabledRules.has("trailing-whitespace"),
@@ -997,6 +1019,7 @@ function unchangedMarkdownResult(
     changes: {
       whitespaceOnlyLinesCleaned: 0,
       extraBlankLinesRemoved: 0,
+      listItemBlankLinesRemoved: 0,
       nonblankTrailingWhitespaceLinesCleaned: 0,
       trailingBlankLinesRemoved: 0,
       headingsCapitalized: 0,
@@ -1517,6 +1540,174 @@ function splitLinesPreservingEndings(input: string): LineToken[] {
   return tokens;
 }
 
+function compactListItemBlankLines(
+  tokens: readonly ProcessedLineToken[],
+): { tokens: ProcessedLineToken[]; removed: number } {
+  const compacted: ProcessedLineToken[] = [];
+  const provenOrderedItems = new Set<number>();
+  let removed = 0;
+  let index = 0;
+
+  while (index < tokens.length) {
+    const token = tokens[index];
+    if (!token) {
+      index += 1;
+      continue;
+    }
+    compacted.push(token);
+
+    const currentSignature = token.protected
+      ? null
+      : readListItemSignature(token.body, index === 0);
+    if (
+      !currentSignature ||
+      !isProvenListItem(
+        tokens,
+        index,
+        currentSignature,
+        provenOrderedItems,
+      )
+    ) {
+      index += 1;
+      continue;
+    }
+    if (currentSignature.orderedNumber !== null) {
+      provenOrderedItems.add(index);
+    }
+
+    let nextIndex = index + 1;
+    while (
+      nextIndex < tokens.length &&
+      isBlankListSeparator(
+        tokens[nextIndex],
+        currentSignature.containerPath,
+      )
+    ) {
+      nextIndex += 1;
+    }
+    if (nextIndex === index + 1) {
+      index += 1;
+      continue;
+    }
+
+    const nextToken = tokens[nextIndex];
+    const nextSignature =
+      nextToken && !nextToken.protected
+        ? readListItemSignature(nextToken.body, nextIndex === 0)
+        : null;
+    if (
+      nextSignature &&
+      sameListItemSignature(currentSignature, nextSignature)
+    ) {
+      if (nextSignature.orderedNumber !== null) {
+        provenOrderedItems.add(nextIndex);
+      }
+      removed += nextIndex - index - 1;
+      index = nextIndex;
+      continue;
+    }
+
+    index += 1;
+  }
+
+  return { tokens: compacted, removed };
+}
+
+function readListItemSignature(
+  line: string,
+  allowLeadingBom: boolean,
+): ListItemSignature | null {
+  const comparableLine = allowLeadingBom
+    ? line.replace(/^\uFEFF/, "")
+    : line;
+  for (const candidate of markdownContainerCandidates(comparableLine, false)) {
+    if (isThematicBreakCandidate(candidate.content)) continue;
+    const marker = stripDirectListMarker(
+      candidate.content,
+      candidate.column,
+    );
+    if (!marker || !/[^ \t]/.test(marker.content)) continue;
+
+    const category = /^\[[^\]\r\n]\](?:[ \t]+|$)/.test(
+      marker.content,
+    )
+      ? "task"
+      : "plain";
+    const ordered = /^(\d{1,9})([.)])$/.exec(marker.marker);
+    const markerClass = ordered
+      ? `ordered:${ordered[2]}:${category}`
+      : `bullet:${marker.marker}:${category}`;
+    return {
+      containerPath: candidate.containerPath,
+      markerIndent: marker.markerIndent,
+      markerClass,
+      orderedNumber: ordered ? Number.parseInt(ordered[1] ?? "", 10) : null,
+    };
+  }
+  return null;
+}
+
+function isProvenListItem(
+  tokens: readonly ProcessedLineToken[],
+  index: number,
+  signature: ListItemSignature,
+  provenOrderedItems: ReadonlySet<number>,
+): boolean {
+  if (
+    signature.orderedNumber === null ||
+    signature.orderedNumber === 1 ||
+    index === 0
+  ) {
+    return true;
+  }
+
+  if (isBlankListSeparator(tokens[index - 1], signature.containerPath)) {
+    return true;
+  }
+
+  const previousToken = tokens[index - 1];
+  const previousSignature =
+    previousToken && !previousToken.protected
+      ? readListItemSignature(previousToken.body, index - 1 === 0)
+      : null;
+  return Boolean(
+    previousSignature &&
+      previousSignature.orderedNumber !== null &&
+      sameListItemSignature(previousSignature, signature) &&
+      provenOrderedItems.has(index - 1),
+  );
+}
+
+function isBlankListSeparator(
+  token: ProcessedLineToken | undefined,
+  containerPath: readonly ContainerStep[],
+): boolean {
+  if (!token || token.protected) return false;
+  const content = stripContainerContinuation(token.body, containerPath);
+  return content !== null && /^[ \t]*$/.test(content);
+}
+
+function sameListItemSignature(
+  left: ListItemSignature,
+  right: ListItemSignature,
+): boolean {
+  return (
+    left.markerIndent === right.markerIndent &&
+    left.markerClass === right.markerClass &&
+    serializeContainerPath(left.containerPath) ===
+      serializeContainerPath(right.containerPath)
+  );
+}
+
+function isThematicBreakCandidate(line: string): boolean {
+  const content = line.trim();
+  return (
+    /^(?:-[ \t]*){3,}$/.test(content) ||
+    /^(?:\*[ \t]*){3,}$/.test(content) ||
+    /^(?:_[ \t]*){3,}$/.test(content)
+  );
+}
+
 function readLintRangeDirective(
   line: string,
 ): "disable" | "enable" | null {
@@ -1757,7 +1948,13 @@ function stripOneBlockquotePrefix(
 function stripDirectListMarker(
   line: string,
   startColumn = 0,
-): { content: string; indent: number; column: number } | null {
+): {
+  content: string;
+  indent: number;
+  column: number;
+  marker: string;
+  markerIndent: number;
+} | null {
   let cursor = 0;
   let column = startColumn;
   while (cursor < line.length) {
@@ -1790,6 +1987,8 @@ function stripDirectListMarker(
     content: line.slice(cursor),
     indent: contentColumn - startColumn,
     column: contentColumn,
+    marker,
+    markerIndent: markerColumn - marker.length - startColumn,
   };
 }
 

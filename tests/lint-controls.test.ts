@@ -26,6 +26,7 @@ test("exports stable namespaced control keys and rule IDs", () => {
     "filename",
     "whitespace-only-lines",
     "blank-lines",
+    "list-item-blank-lines",
     "trailing-whitespace",
     "trailing-blank-lines",
     "final-newline",

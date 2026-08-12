@@ -24,6 +24,7 @@ const EXPECTED_SETTING_KEYS = [
   "lintOnSave",
   "normalizeHeadingLevels",
   "pushHeadingHierarchyToH6",
+  "removeBlankLinesBetweenListItems",
   "removeObsidianLinkCharacters",
   "removeTrailingBlankLines",
   "schemaVersion",
@@ -33,13 +34,14 @@ const EXPECTED_SETTING_KEYS = [
 
 test("settings defaults are conservative and TPS-specific", () => {
   assert.deepEqual(DEFAULT_SETTINGS, {
-    schemaVersion: 6,
+    schemaVersion: 7,
     lintOnSave: true,
     cleanFilenames: true,
     filenameUnsafeCharacterStyle: "space",
     removeObsidianLinkCharacters: false,
     cleanWhitespaceOnlyLines: true,
     collapseConsecutiveBlankLines: true,
+    removeBlankLinesBetweenListItems: false,
     trimNonblankTrailingWhitespace: false,
     removeTrailingBlankLines: false,
     ensureFinalNewline: true,
@@ -86,10 +88,11 @@ test("GCM property priority is trimmed, case-deduplicated, and fail-safe", () =>
   );
 });
 
-test("schema v6 keeps both blank-line insertion rules opt-in", () => {
+test("schema v7 keeps spacing mutations opt-in", () => {
   assert.equal(DEFAULT_SETTINGS.lintOnSave, true);
   assert.equal(DEFAULT_SETTINGS.ensureBlankLineAtBeginning, false);
   assert.equal(DEFAULT_SETTINGS.ensureBlankLineAfterFrontmatter, false);
+  assert.equal(DEFAULT_SETTINGS.removeBlankLinesBetweenListItems, false);
   assert.equal(normalizeSettings({ lintOnSave: false }).lintOnSave, false);
   assert.equal(
     normalizeSettings({ ensureBlankLineAtBeginning: true })
@@ -101,9 +104,14 @@ test("schema v6 keeps both blank-line insertion rules opt-in", () => {
       .ensureBlankLineAfterFrontmatter,
     true,
   );
+  assert.equal(
+    normalizeSettings({ removeBlankLinesBetweenListItems: true })
+      .removeBlankLinesBetweenListItems,
+    true,
+  );
 });
 
-test("normalization accepts valid values and stamps schema v6", () => {
+test("normalization accepts valid values and stamps schema v7", () => {
   assert.deepEqual(
     normalizeSettings({
       schemaVersion: 999,
@@ -113,6 +121,7 @@ test("normalization accepts valid values and stamps schema v6", () => {
       removeObsidianLinkCharacters: true,
       cleanWhitespaceOnlyLines: false,
       collapseConsecutiveBlankLines: false,
+      removeBlankLinesBetweenListItems: true,
       trimNonblankTrailingWhitespace: true,
       removeTrailingBlankLines: true,
       ensureFinalNewline: false,
@@ -134,6 +143,7 @@ test("normalization accepts valid values and stamps schema v6", () => {
       removeObsidianLinkCharacters: true,
       cleanWhitespaceOnlyLines: false,
       collapseConsecutiveBlankLines: false,
+      removeBlankLinesBetweenListItems: true,
       trimNonblankTrailingWhitespace: true,
       removeTrailingBlankLines: true,
       ensureFinalNewline: false,
@@ -159,6 +169,7 @@ test("invalid enum and primitive values safely fall back", () => {
       removeObsidianLinkCharacters: "true",
       cleanWhitespaceOnlyLines: 0,
       collapseConsecutiveBlankLines: "yes",
+      removeBlankLinesBetweenListItems: "yes",
       trimNonblankTrailingWhitespace: null,
       removeTrailingBlankLines: "yes",
       ensureFinalNewline: {},
@@ -206,10 +217,11 @@ test("v2 migration adds the new heading option without restoring removed exclusi
     normalizeHeadingLevels: true,
   });
 
-  assert.equal(normalized.schemaVersion, 6);
+  assert.equal(normalized.schemaVersion, 7);
   assert.equal(normalized.lintOnSave, true);
   assert.equal(normalized.ensureBlankLineAtBeginning, false);
   assert.equal(normalized.ensureBlankLineAfterFrontmatter, false);
+  assert.equal(normalized.removeBlankLinesBetweenListItems, false);
   assert.equal(normalized.pushHeadingHierarchyToH6, false);
   assert.equal(normalized.cleanFilenames, true);
   assert.equal(normalized.removeTrailingBlankLines, false);
@@ -223,10 +235,11 @@ test("v3 migration preserves behavior and adds later controls", () => {
     pushHeadingHierarchyToH6: true,
   });
 
-  assert.equal(normalized.schemaVersion, 6);
+  assert.equal(normalized.schemaVersion, 7);
   assert.equal(normalized.lintOnSave, true);
   assert.equal(normalized.ensureBlankLineAtBeginning, false);
   assert.equal(normalized.ensureBlankLineAfterFrontmatter, false);
+  assert.equal(normalized.removeBlankLinesBetweenListItems, false);
   assert.equal(normalized.cleanFilenames, true);
   assert.equal(normalized.removeTrailingBlankLines, false);
   assert.equal(normalized.pushHeadingHierarchyToH6, true);
@@ -240,10 +253,11 @@ test("v4 migration enables requested save linting and keeps new spacing off", ()
     pushHeadingHierarchyToH6: true,
   });
 
-  assert.equal(normalized.schemaVersion, 6);
+  assert.equal(normalized.schemaVersion, 7);
   assert.equal(normalized.lintOnSave, true);
   assert.equal(normalized.ensureBlankLineAtBeginning, false);
   assert.equal(normalized.ensureBlankLineAfterFrontmatter, false);
+  assert.equal(normalized.removeBlankLinesBetweenListItems, false);
   assert.equal(normalized.pushHeadingHierarchyToH6, true);
   assert.deepEqual(normalized.excludedPaths, ["Custom/Safe"]);
 });
@@ -257,11 +271,29 @@ test("v5 migration preserves existing choices and adds leading spacing off", () 
     excludedPaths: ["Custom/Safe"],
   });
 
-  assert.equal(normalized.schemaVersion, 6);
+  assert.equal(normalized.schemaVersion, 7);
   assert.equal(normalized.lintOnSave, false);
   assert.equal(normalized.collapseConsecutiveBlankLines, false);
   assert.equal(normalized.ensureBlankLineAtBeginning, false);
   assert.equal(normalized.ensureBlankLineAfterFrontmatter, true);
+  assert.equal(normalized.removeBlankLinesBetweenListItems, false);
+  assert.deepEqual(normalized.excludedPaths, ["Custom/Safe"]);
+});
+
+test("v6 migration adds list-item compaction off and preserves existing choices", () => {
+  const normalized = normalizeSettings({
+    schemaVersion: 6,
+    lintOnSave: false,
+    collapseConsecutiveBlankLines: true,
+    ensureBlankLineAfterFrontmatter: true,
+    excludedPaths: ["Custom/Safe"],
+  });
+
+  assert.equal(normalized.schemaVersion, 7);
+  assert.equal(normalized.lintOnSave, false);
+  assert.equal(normalized.collapseConsecutiveBlankLines, true);
+  assert.equal(normalized.ensureBlankLineAfterFrontmatter, true);
+  assert.equal(normalized.removeBlankLinesBetweenListItems, false);
   assert.deepEqual(normalized.excludedPaths, ["Custom/Safe"]);
 });
 
@@ -331,8 +363,10 @@ test("settings UI preserves controls behind four accessible transient routes", (
 
   for (const settingName of [
     "Lint notes on save",
-    "Add blank line at beginning of note",
+    "Add blank line before plain-note content",
+    "Add blank body line after frontmatter",
     "Remove extra blank lines",
+    "Remove blank lines between list items",
     "Clear whitespace-only lines",
     "Trim nonblank trailing whitespace",
     "Ensure a final newline",
@@ -342,7 +376,6 @@ test("settings UI preserves controls behind four accessible transient routes", (
     "Push heading hierarchy down to H6",
     "First heading level",
     "Sort frontmatter fields",
-    "Add blank line after frontmatter",
     "Clean filenames",
     "Unsafe character replacement",
     "Remove Obsidian link-control characters",

@@ -14,6 +14,7 @@ import {
 const OPTIONS: MarkdownCleanupOptions = {
   cleanWhitespaceOnlyLines: true,
   collapseConsecutiveBlankLines: true,
+  removeBlankLinesBetweenListItems: false,
   trimNonblankTrailingWhitespace: false,
   removeTrailingBlankLines: false,
   ensureFinalNewline: true,
@@ -37,6 +38,19 @@ test("save feedback reports applied blank-line and heading changes", () => {
   );
 });
 
+test("save feedback names compacted list-item gaps", () => {
+  const result = cleanMarkdown("- one\n\n- two\n\n- three\n", {
+    ...OPTIONS,
+    removeBlankLinesBetweenListItems: true,
+  });
+
+  assert.equal(result.changes.listItemBlankLinesRemoved, 2);
+  assert.equal(
+    formatSaveLintNotice(result),
+    "TPS Linter: removed 2 blank lines between list items.",
+  );
+});
+
 test("save feedback stays silent for the convergent self-triggered rerun", () => {
   const first = cleanMarkdown("A\n\n\nB\n", OPTIONS);
   const second = cleanMarkdown(first.output, OPTIONS);
@@ -47,7 +61,22 @@ test("save feedback stays silent for the convergent self-triggered rerun", () =>
   assert.equal(formatSaveLintNotice(second), null);
   assert.equal(
     formatExplicitSaveNoChangeNotice(second),
-    "TPS Linter: no eligible changes.",
+    "TPS Linter: no changes under the rules enabled on this device.",
+  );
+});
+
+test("explicit-save feedback names relevant opt-in rules that are off", () => {
+  const clean = cleanMarkdown("Body\n", OPTIONS);
+  assert.equal(
+    formatExplicitSaveNoChangeNotice(clean, ["leading-blank-line"]),
+    "TPS Linter: no changes; Add blank line before plain-note content is off on this device.",
+  );
+  assert.equal(
+    formatExplicitSaveNoChangeNotice(clean, [
+      "frontmatter-blank-line",
+      "list-item-blank-lines",
+    ]),
+    "TPS Linter: no changes; Add blank body line after frontmatter and Remove blank lines between list items are off on this device.",
   );
 });
 
@@ -55,7 +84,7 @@ test("explicit-save no-change feedback distinguishes disabled and blocked notes"
   const clean = cleanMarkdown("Body\n", OPTIONS);
   assert.equal(
     formatExplicitSaveNoChangeNotice(clean),
-    "TPS Linter: no eligible changes.",
+    "TPS Linter: no changes under the rules enabled on this device.",
   );
   assert.equal(
     formatExplicitSaveNoChangeNotice({
@@ -94,6 +123,7 @@ test("save feedback uses a bounded fallback for an unclassified change", () => {
     changes: {
       whitespaceOnlyLinesCleaned: 0,
       extraBlankLinesRemoved: 0,
+      listItemBlankLinesRemoved: 0,
       nonblankTrailingWhitespaceLinesCleaned: 0,
       trailingBlankLinesRemoved: 0,
       headingsCapitalized: 0,
@@ -119,6 +149,7 @@ test("save feedback bounds a many-rule result to three named actions", () => {
     changes: {
       whitespaceOnlyLinesCleaned: 2,
       extraBlankLinesRemoved: 3,
+      listItemBlankLinesRemoved: 0,
       nonblankTrailingWhitespaceLinesCleaned: 4,
       trailingBlankLinesRemoved: 5,
       headingsCapitalized: 6,

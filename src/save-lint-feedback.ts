@@ -1,4 +1,8 @@
 import type { MarkdownCleanupResult } from "./cleaner";
+import {
+  describeRelevantOptInRules,
+  type RelevantOptInRule,
+} from "./opt-in-suggestions.ts";
 
 const MAX_REPORTED_ACTIONS = 3;
 const MAX_NOTICE_LENGTH = 180;
@@ -27,6 +31,12 @@ export function formatSaveLintNotice(
     actions.push({
       count: changes.extraBlankLinesRemoved,
       text: `removed ${changes.extraBlankLinesRemoved} extra blank ${plural("line", changes.extraBlankLinesRemoved)}`,
+    });
+  }
+  if (changes.listItemBlankLinesRemoved > 0) {
+    actions.push({
+      count: changes.listItemBlankLinesRemoved,
+      text: `removed ${changes.listItemBlankLinesRemoved} blank ${plural("line", changes.listItemBlankLinesRemoved)} between list items`,
     });
   }
   if (changes.nonblankTrailingWhitespaceLinesCleaned > 0) {
@@ -80,6 +90,7 @@ export function formatSaveLintNotice(
 
 export function formatExplicitSaveNoChangeNotice(
   result: MarkdownCleanupResult,
+  relevantDisabledRules: readonly RelevantOptInRule[] = [],
 ): string | null {
   if (result.changed) return null;
   if (result.noteDisabledReason) {
@@ -91,7 +102,12 @@ export function formatExplicitSaveNoChangeNotice(
   if (result.changes.frontmatterSortSkippedReason) {
     return "TPS Linter: no changes; frontmatter sorting was skipped for safety.";
   }
-  return "TPS Linter: no eligible changes.";
+  if (relevantDisabledRules.length > 0) {
+    const labels = describeRelevantOptInRules(relevantDisabledRules);
+    const verb = relevantDisabledRules.length === 1 ? "is" : "are";
+    return `TPS Linter: no changes; ${labels} ${verb} off on this device.`;
+  }
+  return "TPS Linter: no changes under the rules enabled on this device.";
 }
 
 function plural(word: string, count: number): string {

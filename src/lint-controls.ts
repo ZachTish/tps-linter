@@ -28,6 +28,7 @@ export const TPS_LINTER_RULE_IDS = Object.freeze([
   "filename",
   "whitespace-only-lines",
   "blank-lines",
+  "list-item-blank-lines",
   "trailing-whitespace",
   "trailing-blank-lines",
   "final-newline",

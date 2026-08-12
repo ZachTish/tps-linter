@@ -28,6 +28,7 @@ test("generated Markdown cleanup is deterministic, idempotent, and line-ending s
     const options: MarkdownCleanupOptions = {
       cleanWhitespaceOnlyLines: random() < 0.8,
       collapseConsecutiveBlankLines: random() < 0.8,
+      removeBlankLinesBetweenListItems: random() < 0.5,
       trimNonblankTrailingWhitespace: random() < 0.5,
       removeTrailingBlankLines: random() < 0.5,
       ensureFinalNewline: random() < 0.8,
@@ -66,6 +67,7 @@ test("generated protected-only documents remain byte-identical", () => {
   const aggressiveOptions: MarkdownCleanupOptions = {
     cleanWhitespaceOnlyLines: true,
     collapseConsecutiveBlankLines: true,
+    removeBlankLinesBetweenListItems: true,
     trimNonblankTrailingWhitespace: true,
     removeTrailingBlankLines: true,
     ensureFinalNewline: true,
@@ -125,6 +127,7 @@ test("arbitrary Markdown-like code-unit streams never throw and converge", () =>
   const aggressiveOptions: MarkdownCleanupOptions = {
     cleanWhitespaceOnlyLines: true,
     collapseConsecutiveBlankLines: true,
+    removeBlankLinesBetweenListItems: true,
     trimNonblankTrailingWhitespace: true,
     removeTrailingBlankLines: true,
     ensureFinalNewline: true,

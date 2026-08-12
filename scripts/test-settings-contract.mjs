@@ -13,6 +13,7 @@ const mainSource = readFileSync(new URL("../src/main.ts", import.meta.url), "utf
 const cleanerSource = readFileSync(new URL("../src/cleaner.ts", import.meta.url), "utf8");
 const gcmCompatSource = readFileSync(new URL("../src/gcm-compat.ts", import.meta.url), "utf8");
 const lintControlsSource = readFileSync(new URL("../src/lint-controls.ts", import.meta.url), "utf8");
+const optInSuggestionsSource = readFileSync(new URL("../src/opt-in-suggestions.ts", import.meta.url), "utf8");
 const saveLintSchedulerSource = readFileSync(new URL("../src/save-lint-scheduler.ts", import.meta.url), "utf8");
 const settingsTabSource = readFileSync(new URL("../src/settings-tab.ts", import.meta.url), "utf8");
 const vaultFileIdentitySource = readFileSync(new URL("../src/vault-file-identity.ts", import.meta.url), "utf8");
@@ -24,7 +25,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.6.2",
+    version: "0.7.0",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
@@ -57,6 +58,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.6.0": "1.10.0",
     "0.6.1": "1.10.0",
     "0.6.2": "1.10.0",
+    "0.7.0": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -78,7 +80,34 @@ test("leading blank-line cleanup is wired through settings, runtime, and reporti
   assert.match(mainSource, /added a blank line at the beginning of the note/);
   assert.match(
     settingsTabSource,
-    /setName\("Add blank line at beginning of note"\)/,
+    /setName\("Add blank line before plain-note content"\)/,
+  );
+  assert.match(
+    settingsTabSource,
+    /setName\("Add blank body line after frontmatter"\)/,
+  );
+});
+
+test("list-item blank-line cleanup is opt-in and wired end to end", () => {
+  assert.match(
+    mainSource,
+    /removeBlankLinesBetweenListItems:\s*this\.settings\.removeBlankLinesBetweenListItems/,
+  );
+  assert.match(cleanerSource, /function compactListItemBlankLines\(/);
+  assert.match(cleanerSource, /!disabledRules\.has\("list-item-blank-lines"\)/);
+  assert.match(mainSource, /blank .*between list items/);
+  assert.match(
+    settingsTabSource,
+    /setName\("Remove blank lines between list items"\)/,
+  );
+  assert.match(
+    settingsTabSource,
+    /setValue\(this\.plugin\.settings\.removeBlankLinesBetweenListItems\)/,
+  );
+  assert.match(
+    allSource,
+    /removeBlankLinesBetweenListItems:\s*false/,
+    "the semantic list-tightening rule must remain default-off",
   );
 });
 
@@ -175,12 +204,12 @@ test("save linting is active-note scoped and keeps automatic filename ownership 
   assert.match(saveSource, /this\.saveLintFeedback\.requeueRun\(file, feedbackRun\)/);
   assert.match(
     saveSource,
-    /const reportExplicitNoChange\s*=\s*this\.saveLintFeedback\.completeRun\(file, feedbackRun\)[\s\S]*reportExplicitNoChange &&[\s\S]*formatExplicitSaveNoChangeNotice\(preflight\)/,
+    /const reportExplicitNoChange\s*=\s*this\.saveLintFeedback\.completeRun\(file, feedbackRun\)[\s\S]*const relevantDisabledRules = reportExplicitNoChange\s*\? findRelevantDisabledOptInRules\([\s\S]*formatExplicitSaveNoChangeNotice\(\s*preflight,\s*relevantDisabledRules,?\s*\)/,
   );
   assert.match(saveSource, /\? formatSaveLintNotice\(result\)/);
   assert.match(
     saveSource,
-    /: reportExplicitNoChange\s*\? formatExplicitSaveNoChangeNotice\(result\)\s*:\s*null/,
+    /: reportExplicitNoChange\s*\? formatExplicitSaveNoChangeNotice\(\s*result,\s*findRelevantDisabledOptInRules\(/,
   );
   assert.match(
     saveSource,
@@ -278,7 +307,7 @@ test("manual check and clean use fresh preflights and clean stays atomic", () =>
   );
   assert.match(
     checkWithNoticeSource,
-    /const inspection = await this\.inspectFile\(file, true\)/,
+    /const inspection = await this\.inspectFile\(file, true, true\)/,
     "Check must inspect fresh persisted bytes rather than a stale cache entry",
   );
   assert.match(
@@ -294,6 +323,32 @@ test("manual check and clean use fresh preflights and clean stays atomic", () =>
     inspectFileSource,
     /sourceContent: content,/,
     "the retained preflight bytes must come from the same fresh read passed to cleanMarkdown",
+  );
+  assert.match(
+    inspectFileSource,
+    /includeOptInSuggestions && !markdown\.changed\s*\?\s*findRelevantDisabledOptInRules\(/,
+    "a clean manual Check should explain relevant opt-in rules without writing",
+  );
+  assert.match(
+    cleanFileSource,
+    /const relevantDisabledOptInRules = contentChanged\s*\? \[\]\s*:\s*findRelevantDisabledOptInRules\(\s*currentMarkdown\.output,/,
+    "a no-op manual Clean should explain relevant disabled opt-in rules from the final processed bytes",
+  );
+  assert.match(
+    cleanFileSource,
+    /file,\s*true,\s*false,\s*markdownOptions,/,
+    "manual Clean must not run suggestion probes on its preliminary inspection",
+  );
+  assert.match(mainSource, /Optional fixes off on this device:/);
+  assert.match(
+    mainSource,
+    /let resultOptions = preflightOptions;[\s\S]*resultOptions = processOptions;[\s\S]*findRelevantDisabledOptInRules\(\s*result\.output,\s*resultOptions,\s*result,/,
+    "post-process save suggestions must use the exact option snapshot that produced the result",
+  );
+  assert.equal(
+    (optInSuggestionsSource.match(/cleanMarkdown\(/g) ?? []).length,
+    2,
+    "suggestion detection should perform at most one baseline and one combined read-only probe",
   );
   assert.equal(
     (cleanFileSource.match(/this\.app\.vault\.process\(/g) ?? []).length,
@@ -606,6 +661,7 @@ test("note-local controls, range markers, and idempotence gates remain stable", 
     "filename",
     "whitespace-only-lines",
     "blank-lines",
+    "list-item-blank-lines",
     "trailing-whitespace",
     "trailing-blank-lines",
     "final-newline",
@@ -697,8 +753,13 @@ test("note-local controls, range markers, and idempotence gates remain stable", 
 
 test("TPS Linter settings destinations stay accessible, responsive, and namespaced", () => {
   assert.match(settingsTabSource, /setName\("Lint notes on save"\)/);
-  assert.match(settingsTabSource, /setName\("Add blank line at beginning of note"\)/);
-  assert.match(settingsTabSource, /setName\("Add blank line after frontmatter"\)/);
+  assert.match(settingsTabSource, /setName\("Add blank line before plain-note content"\)/);
+  assert.match(settingsTabSource, /setName\("Add blank body line after frontmatter"\)/);
+  assert.equal(
+    (settingsTabSource.match(/setValue\(this\.plugin\.settings\.ensureBlankLineAfterFrontmatter\)/g) ?? []).length,
+    1,
+    "the after-frontmatter setting must have one persisted UI owner",
+  );
   assert.match(settingsTabSource, /tps-linter-settings-actions/);
   assert.match(settingsTabSource, /tps-linter-settings-ownership/);
   assert.doesNotMatch(settingsTabSource, /createEl\(\s*["']details["']/);

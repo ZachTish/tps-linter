@@ -27,7 +27,7 @@ const SETTINGS_DESTINATIONS: ReadonlyArray<{
   {
     id: "clean-notes",
     label: "Clean notes",
-    description: "Save workflow and whitespace",
+    description: "Save workflow and body spacing",
   },
   {
     id: "headings",
@@ -37,7 +37,7 @@ const SETTINGS_DESTINATIONS: ReadonlyArray<{
   {
     id: "frontmatter",
     label: "Frontmatter",
-    description: "Field order and body spacing",
+    description: "Field order and property ownership",
   },
   {
     id: "files-safety",
@@ -229,7 +229,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
 
     new Setting(parent)
       .setName("Lint notes on save")
-      .setDesc("Automatically clean the active Markdown editor after Obsidian persists a modification or when you press the standard Cmd-S/Ctrl-S shortcut in that editor. A small notice lists applied changes; filename cleanup remains manual, and no whole-vault scan runs.")
+      .setDesc("Automatically apply the rules enabled on this device to the active Markdown editor after Obsidian persists a modification or when you press the standard Cmd-S/Ctrl-S shortcut in that editor. A small notice lists applied changes; filename cleanup remains manual, and no whole-vault scan runs.")
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.lintOnSave)
@@ -240,13 +240,25 @@ export class TPSLinterSettingTab extends PluginSettingTab {
       });
 
     new Setting(parent)
-      .setName("Add blank line at beginning of note")
-      .setDesc("Insert one empty first line in notes without frontmatter. Frontmatter stays on line one; use Add blank line after frontmatter for those notes.")
+      .setName("Add blank line before plain-note content")
+      .setDesc("In notes without frontmatter, insert one empty line before the first body content. This opt-in rule is off by default and must be enabled on each device.")
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.ensureBlankLineAtBeginning)
           .onChange(async (value) => {
             this.plugin.settings.ensureBlankLineAtBeginning = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(parent)
+      .setName("Add blank body line after frontmatter")
+      .setDesc("Insert one empty, editable line immediately below the closing --- (or ...) in valid top-of-note frontmatter, including metadata-only notes. This opt-in rule is off by default and must be enabled on each device.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.ensureBlankLineAfterFrontmatter)
+          .onChange(async (value) => {
+            this.plugin.settings.ensureBlankLineAfterFrontmatter = value;
             await this.plugin.saveSettings();
           });
       });
@@ -259,6 +271,18 @@ export class TPSLinterSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.collapseConsecutiveBlankLines)
           .onChange(async (value) => {
             this.plugin.settings.collapseConsecutiveBlankLines = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(parent)
+      .setName("Remove blank lines between list items")
+      .setDesc("Remove blank-only separators between same-indentation Markdown list items and checklists. This opt-in rule is off by default and must be enabled on each device; nested transitions, mixed list types, continuation paragraphs, and protected regions stay unchanged.")
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.removeBlankLinesBetweenListItems)
+          .onChange(async (value) => {
+            this.plugin.settings.removeBlankLinesBetweenListItems = value;
             await this.plugin.saveSettings();
           });
       });
@@ -397,18 +421,6 @@ export class TPSLinterSettingTab extends PluginSettingTab {
           });
       });
 
-    new Setting(parent)
-      .setName("Add blank line after frontmatter")
-      .setDesc("Keep one empty, editable body line after valid top-of-note frontmatter, including metadata-only notes. Existing body spacing is left to the blank-line rules.")
-      .addToggle((toggle) => {
-        toggle
-          .setValue(this.plugin.settings.ensureBlankLineAfterFrontmatter)
-          .onChange(async (value) => {
-            this.plugin.settings.ensureBlankLineAfterFrontmatter = value;
-            await this.plugin.saveSettings();
-          });
-      });
-
     const ownership = parent.createDiv({
       cls: "tps-linter-settings-frontmatter-ownership",
     });
@@ -487,7 +499,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
     const ruleCopy = reference.createEl("p");
     ruleCopy.appendText("Rule IDs: ");
     ruleCopy.createEl("code", {
-      text: "filename, whitespace-only-lines, blank-lines, trailing-whitespace, trailing-blank-lines, final-newline, leading-blank-line, heading-capitalization, heading-levels, frontmatter-blank-line, frontmatter-sort, all",
+      text: "filename, whitespace-only-lines, blank-lines, list-item-blank-lines, trailing-whitespace, trailing-blank-lines, final-newline, leading-blank-line, heading-capitalization, heading-levels, frontmatter-blank-line, frontmatter-sort, all",
     });
     ruleCopy.appendText(".");
 

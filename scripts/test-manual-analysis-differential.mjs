@@ -63,6 +63,7 @@ assert.deepEqual(
 const baseOptions = {
   cleanWhitespaceOnlyLines: true,
   collapseConsecutiveBlankLines: true,
+  removeBlankLinesBetweenListItems: false,
   trimNonblankTrailingWhitespace: false,
   removeTrailingBlankLines: false,
   ensureFinalNewline: true,
@@ -190,12 +191,12 @@ function compareCase(input, options, label) {
     `${label}: lint controls`,
   );
   assert.deepEqual(
-    withoutLeadingBlankLineChange(candidate.markdown),
+    withoutNewOptInChanges(candidate.markdown),
     releasedMarkdown,
     `${label}: combined Markdown`,
   );
   assert.deepEqual(
-    withoutLeadingBlankLineChange(
+    withoutNewOptInChanges(
       candidateCleaner.cleanMarkdown(input, options),
     ),
     releasedMarkdown,
@@ -204,14 +205,22 @@ function compareCase(input, options, label) {
   caseCount += 1;
 }
 
-function withoutLeadingBlankLineChange(result) {
+function withoutNewOptInChanges(result) {
   assert.equal(
     result.changes.leadingBlankLineAdded,
     false,
     "historical differential options must keep leading spacing disabled",
   );
-  const { leadingBlankLineAdded: _leadingBlankLineAdded, ...changes } =
-    result.changes;
+  assert.equal(
+    result.changes.listItemBlankLinesRemoved,
+    0,
+    "historical differential options must keep list-item compaction disabled",
+  );
+  const {
+    leadingBlankLineAdded: _leadingBlankLineAdded,
+    listItemBlankLinesRemoved: _listItemBlankLinesRemoved,
+    ...changes
+  } = result.changes;
   return { ...result, changes };
 }
 

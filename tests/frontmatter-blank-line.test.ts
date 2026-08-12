@@ -9,6 +9,7 @@ import {
 const SPACING_ONLY_OPTIONS: MarkdownCleanupOptions = {
   cleanWhitespaceOnlyLines: false,
   collapseConsecutiveBlankLines: false,
+  removeBlankLinesBetweenListItems: false,
   trimNonblankTrailingWhitespace: false,
   removeTrailingBlankLines: false,
   ensureFinalNewline: false,

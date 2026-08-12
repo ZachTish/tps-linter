@@ -21,6 +21,7 @@ const DEFAULT_FILENAME_OPTIONS = {
 const DEFAULT_MARKDOWN_OPTIONS = {
   cleanWhitespaceOnlyLines: true,
   collapseConsecutiveBlankLines: true,
+  removeBlankLinesBetweenListItems: false,
   trimNonblankTrailingWhitespace: false,
   removeTrailingBlankLines: false,
   ensureFinalNewline: true,
@@ -366,6 +367,7 @@ test("Markdown cleanup preserves BOM and every existing line separator", () => {
   assert.deepEqual(result.changes, {
     whitespaceOnlyLinesCleaned: 2,
     extraBlankLinesRemoved: 0,
+    listItemBlankLinesRemoved: 0,
     nonblankTrailingWhitespaceLinesCleaned: 0,
     trailingBlankLinesRemoved: 0,
     headingsCapitalized: 0,
@@ -1970,6 +1972,7 @@ test("empty and already-clean Markdown are no-ops and cleanup is idempotent", ()
     changes: {
       whitespaceOnlyLinesCleaned: 0,
       extraBlankLinesRemoved: 0,
+      listItemBlankLinesRemoved: 0,
       nonblankTrailingWhitespaceLinesCleaned: 0,
       trailingBlankLinesRemoved: 0,
       headingsCapitalized: 0,
