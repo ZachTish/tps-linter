@@ -164,11 +164,16 @@ console.log(
   JSON.stringify({
     baseline: "fd2bfbb968e0615c27256725f7bed06aaf0a2162",
     cases: caseCount,
-    result: "exact controls and Markdown result parity",
+    result:
+      "exact controls and non-capitalization Markdown result parity",
   }),
 );
 
 function compareCase(input, options, label) {
+  const comparisonOptions = {
+    ...options,
+    headingCapitalizationStyle: "off",
+  };
   const safetyBlockedReason =
     baselineCleaner.inspectMarkdownInputSafety(input);
   const releasedLintControls = safetyBlockedReason
@@ -179,10 +184,13 @@ function compareCase(input, options, label) {
         reason: `Safety blocked: ${safetyBlockedReason}.`,
       }
     : baselineControls.parseLintControls(input);
-  const releasedMarkdown = baselineCleaner.cleanMarkdown(input, options);
+  const releasedMarkdown = baselineCleaner.cleanMarkdown(
+    input,
+    comparisonOptions,
+  );
   const candidate = candidateCleaner.analyzeMarkdownCleanup(
     input,
-    options,
+    comparisonOptions,
   );
 
   assert.deepEqual(
@@ -197,7 +205,7 @@ function compareCase(input, options, label) {
   );
   assert.deepEqual(
     withoutNewOptInChanges(
-      candidateCleaner.cleanMarkdown(input, options),
+      candidateCleaner.cleanMarkdown(input, comparisonOptions),
     ),
     releasedMarkdown,
     `${label}: public cleanMarkdown`,

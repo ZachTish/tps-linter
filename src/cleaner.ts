@@ -1415,12 +1415,46 @@ function capitalizeHeadingText(
 
 function isPlainHeadingText(text: string): boolean {
   return !(
-    /\[|\]|`|%%|<%|%>|<[^>]+>|\{\{|\}\}|::|\$|@/.test(text) ||
-    /\\[()[\]]/.test(text) ||
-    /(?:^|\s)#[\p{L}\p{N}_/-]+/u.test(text) ||
-    /\b[\p{L}][\p{L}\p{N}+.-]*:\/\//u.test(text) ||
+    /[#\[\]`$@<>^]|%%|<%|%>|\{\{|\}\}|::/.test(text) ||
+    /\\[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/.test(text) ||
+    text.includes("/") ||
+    text.includes("%") ||
+    /(?:^|[^\p{L}\p{N}+.-])[A-Za-z][A-Za-z0-9+.-]*:(?:[^\s]|$)/u.test(
+      text,
+    ) ||
+    hasDotJoinedWordCharacters(text) ||
+    /&(?:#\d{1,7}|#x[\dA-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/.test(
+      text,
+    ) ||
     /(?:^|\s)\^[\p{L}\p{N}-]+[ \t]*$/u.test(text)
   );
+}
+
+function hasDotJoinedWordCharacters(text: string): boolean {
+  const characters = [...text];
+  for (let index = 1; index < characters.length - 1; index += 1) {
+    if (!isDomainDot(characters[index])) continue;
+    if (
+      isUnicodeWordCharacter(characters[index - 1]) &&
+      isUnicodeWordCharacter(characters[index + 1])
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isDomainDot(character: string | undefined): boolean {
+  return (
+    character === "." ||
+    character === "。" ||
+    character === "．" ||
+    character === "｡"
+  );
+}
+
+function isUnicodeWordCharacter(character: string | undefined): boolean {
+  return character !== undefined && /[\p{L}\p{M}\p{N}]/u.test(character);
 }
 
 function capitalizeFirstLetter(text: string): string {

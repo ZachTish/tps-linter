@@ -1,10 +1,10 @@
 # TPS Linter
 
-TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.7.0` adds an opt-in rule that removes blank-only gaps between compatible Markdown list items and checklists while preserving uncertain or structurally different boundaries. Every released command, setting, rule, fail-closed guard, protected-Markdown contract, save-feedback behavior, and ownership-safe filename behavior remains available.
+TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.7.1` prevents heading capitalization from changing case-sensitive tags, links, forward-slash paths, URLs, URIs, inline code, and related inline syntax. Every released command, setting, rule, fail-closed guard, protected-Markdown contract, save-feedback behavior, and ownership-safe filename behavior remains available.
 
 ## Install with BRAT
 
-Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.7.0`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
+Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.7.1`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
 
 The released build is validated in the isolated Obsidian Plugin Test Vault. Publishing the release does not install it in the production vault; the production update remains a separate user-owned BRAT pull.
 
@@ -64,7 +64,7 @@ Body spacing and heading cleanup skip frontmatter; backtick and tilde fences; in
 
 Ambiguous constructs are never guessed. Multiline/unclosed HTML tags, multiline link labels or destinations, multiline reference titles, invalid links containing protected syntax, and reference-style labels whose tag-like meaning depends on a document-wide definition block the entire Markdown cleanup with a visible reason. Unclosed protected constructs remain byte-identical.
 
-Heading capitalization can be disabled, use the conservative first-letter default, or use title case while preserving already-cased terms such as `TPS`, `AI`, and `macOS`. Heading hierarchy can start at H1 or H2. The first ATX heading establishes the shift, repeated siblings remain peers, and a deeper heading may increase by at most one level from its current parent. Shallower returns remain allowed. Setext headings and headings containing TPS/Dataview inline fields, math, tags, URLs, email markers, wiki or Markdown links, inline code, HTML, Templater syntax, template braces, or block IDs keep their text byte-identical; their ATX level can still be normalized.
+Heading capitalization can be disabled, use the conservative first-letter default, or use title case while preserving already-cased terms such as `TPS`, `AI`, and `macOS`. Heading hierarchy can start at H1 or H2. The first ATX heading establishes the shift, repeated siblings remain peers, and a deeper heading may increase by at most one level from its current parent. Shallower returns remain allowed. Setext headings and headings containing TPS/Dataview inline fields, math, any hashtag, URLs, URIs, email markers, wiki or Markdown links, inline code, HTML, entities, escaped Markdown, forward-slash paths, dot-joined domain or file tokens, Templater syntax, template braces, or block IDs keep their complete text byte-identical; their ATX level can still be normalized. This intentionally favors safe false positives over changing case-sensitive inline content.
 
 **Push heading hierarchy down to H6** is an optional, default-off alternative to the H1/H2 start. It derives structural depth from the complete visible ATX outline, treats any deeper source heading as one nested step even when the original hashes skip levels, and shifts the outline so its deepest nesting level is H6. A standalone `## Test` becomes `###### Test`; a parent and child become H5/H6. Siblings remain peers, parent/child steps remain exactly one level, protected block headings do not affect the calculation, and visible headings with inline protected syntax still participate.
 
@@ -160,7 +160,7 @@ Bounded-work guards reject notes over 2,000,000 characters or 50,000 physical li
 - List-item gap cleanup is deliberately limited to compatible markers with the same provable indentation and blockquote path. Four-space and tab-indented marker-like lines, mixed marker families, plain/checklist transitions, continuation content, and protected syntax remain unchanged rather than being guessed at.
 - Frontmatter sorting intentionally skips advanced YAML features that cannot be moved and verified with high confidence.
 - Multiline HTML tags and multiline Markdown link/reference forms are deliberately blocked when the lightweight scanner cannot prove their boundaries. Tag-like shortcut reference labels also require manual review because the scanner does not resolve document-wide reference definitions.
-- Heading text changes can affect explicit heading-fragment links. Because lint on save is enabled by default, disable heading capitalization/normalization, disable `lintOnSave`, or use note-local rule controls where fragment stability is more important.
+- Heading text changes can affect explicit heading-fragment links. Heading-level normalization separately changes outline and section structure. Because lint on save is enabled by default, disable the relevant heading rule, disable `lintOnSave`, or use note-local rule controls where text or structure must remain fixed.
 - Bottom alignment operates on the complete visible ATX outline; a shallow leaf in an uneven tree may remain above H6 to preserve structural relationships.
 - ATX headings prefixed by list or blockquote containers are currently preserved rather than normalized.
 - Protected-block detection is conservative. A malformed or unclosed protected construct remains untouched rather than being guessed at.
@@ -187,6 +187,10 @@ npm run build
 ```
 
 Stable production-mode builds deploy byte-changed `main.js`, `manifest.json`, and `styles.css` only to the isolated test runtime `.obsidian/plugins/tps-linter`. They do not overwrite runtime-owned `data.json`. Direct production deployment is not part of this workflow.
+
+### 0.7.1 validation
+
+Validation covers ordinary, punctuation-adjacent, nested, escaped, Unicode, and emoji-leading hashtags; wikilinks, aliases, embeds, Markdown inline/reference links and images; HTTP, Obsidian, URN, data, protocol-relative, bare-domain, internationalized-domain, IPv4, localhost, relative, and root path forms; URL and email autolinks; inline code; HTML character references; escaped Markdown; first-letter and title-case modes; independent heading-level normalization; BOM, CRLF, closing hashes, exact counters, idempotence, and maximum-line bounded-work near misses. Exact final counts, hashes, reload evidence, save notices, settings preservation, and QA-note disposition are recorded in `release-notes/0.7.1.md`.
 
 ### 0.7.0 validation
 
@@ -261,6 +265,13 @@ Validation covers safe YAML CST sorting and semantic verification, GCM property-
 Validation covers pure filename planning and collision/ownership guards, TPS filename preservation, exact line-ending and protected-block preservation, idempotence, settings normalization, command and settings contracts, TypeScript, the complete declared suite, a separate final production-mode build, runtime deployment, and a reloaded test-vault UI inspection. Exact final test counts, reload evidence, and artifact hashes are recorded in `release-notes/0.1.0.md`.
 
 ## Version history
+
+### 0.7.1
+
+- Preserves the complete text of headings containing case-sensitive tags, links, URLs, URIs, forward-slash paths, inline code, HTML entities, escaped Markdown, and related inline syntax under both capitalization modes.
+- Covers punctuation-adjacent and Unicode/emoji tags, wikilinks and embeds, Markdown links and images, custom schemes, internationalized domains, IPv4/localhost/relative forward-slash paths, and autolinks.
+- Keeps heading-level normalization independent, so hashes may still be corrected while protected heading text and capitalization counters remain unchanged.
+- Uses bounded linear checks at the 32,000-character line limit and changes no setting, default, schema field, exclusion, command, or filename behavior.
 
 ### 0.7.0
 
