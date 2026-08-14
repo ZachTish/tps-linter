@@ -48,6 +48,11 @@ import {
   resolveFrontmatterPriorityKeys,
   type TPSLinterSettings,
 } from "./settings";
+import {
+  isSettingsRecord,
+  isSupportedSettingsSchema,
+  TPSLinterSettingsPersistence,
+} from "./settings-persistence";
 import { TPSLinterSettingTab } from "./settings-tab";
 import {
   SaveLintLifecycle,
@@ -92,7 +97,16 @@ export default class TPSLinterPlugin extends Plugin {
   private readonly saveLintFeedback = new SaveLintFeedbackTracker<TFile>();
   private readonly saveShortcutObservers = new Map<Document, Component>();
   private readonly saveLintLifecycle = new SaveLintLifecycle();
+  private readonly settingsPersistence = new TPSLinterSettingsPersistence({
+    loadLatest: () => this.loadData(),
+    saveMerged: (settings) => this.saveData(settings),
+    getLiveSettings: () => this.settings,
+  });
   private saveLintScheduler: SaveLintScheduler<TFile> | null = null;
+  private settingTab: TPSLinterSettingTab | null = null;
+  private settingsReady = false;
+  private pendingExternalSettingsChange = false;
+  private externalSettingsReloadPromise: Promise<void> | null = null;
 
   async onload(): Promise<void> {
     const lifecycleGeneration = this.saveLintLifecycle.activate();
@@ -115,7 +129,8 @@ export default class TPSLinterPlugin extends Plugin {
         },
       },
     );
-    this.addSettingTab(new TPSLinterSettingTab(this.app, this));
+    this.settingTab = new TPSLinterSettingTab(this.app, this);
+    this.addSettingTab(this.settingTab);
 
     this.addCommand({
       id: "check-current-note",
@@ -183,7 +198,11 @@ export default class TPSLinterPlugin extends Plugin {
       ),
     );
 
+    this.settingsReady = true;
     logDiagnostic("load", this.manifest.id, "ready");
+    if (this.pendingExternalSettingsChange) {
+      void this.onExternalSettingsChange();
+    }
   }
 
   private observeCurrentSaveShortcutDocuments(): void {
@@ -236,6 +255,8 @@ export default class TPSLinterPlugin extends Plugin {
   }
 
   onunload(): void {
+    this.settingsReady = false;
+    this.pendingExternalSettingsChange = false;
     this.saveLintLifecycle.invalidate();
     this.saveLintScheduler?.dispose();
     this.saveLintScheduler = null;
@@ -243,22 +264,121 @@ export default class TPSLinterPlugin extends Plugin {
     for (const doc of [...this.saveShortcutObservers.keys()]) {
       this.stopObservingSaveShortcuts(doc);
     }
+    this.settingTab = null;
     logDiagnostic("unload", this.manifest.id, "complete");
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = normalizeSettings(await this.loadData());
-    setDiagnosticsEnabled(this.settings.diagnostics);
+    const rawSettings = await this.loadData();
+    this.settings = normalizeSettings(rawSettings);
+    this.settingsPersistence.setBaseline(this.settings, rawSettings);
+    this.applyRuntimeSettings();
   }
 
   async saveSettings(): Promise<void> {
     this.settings = normalizeSettings(this.settings);
+    this.applyRuntimeSettings();
+    await this.settingsPersistence.request(this.settings);
+    this.applyRuntimeSettings();
+  }
+
+  async onExternalSettingsChange(): Promise<void> {
+    this.pendingExternalSettingsChange = true;
+    if (!this.settingsReady || !this.saveLintLifecycle.isActive()) return;
+    if (!this.externalSettingsReloadPromise) {
+      this.startExternalSettingsReload();
+    }
+    await this.externalSettingsReloadPromise;
+  }
+
+  private startExternalSettingsReload(): void {
+    // Install ownership before the drain starts. The drain clears it
+    // synchronously before settlement, so a completion-window callback starts
+    // a new drain instead of attaching to one that can no longer observe it.
+    this.externalSettingsReloadPromise = Promise.resolve().then(() =>
+      this.reloadExternalSettings(),
+    );
+  }
+
+  private async reloadExternalSettings(): Promise<void> {
+    try {
+      while (
+        this.pendingExternalSettingsChange &&
+        this.settingsReady &&
+        this.saveLintLifecycle.isActive()
+      ) {
+        this.pendingExternalSettingsChange = false;
+        try {
+          try {
+            await this.settingsPersistence.waitForIdle();
+          } catch (error) {
+            logWarning(
+              "settings-sync",
+              this.manifest.id,
+              `local settings persistence did not finish before external reload: ${summarizeError(error)}`,
+            );
+          }
+          if (!this.settingsReady || !this.saveLintLifecycle.isActive()) return;
+
+          const externalRead = this.settingsPersistence.captureExternalRead();
+          const rawSettings = await this.loadData();
+          if (!this.settingsReady || !this.saveLintLifecycle.isActive()) return;
+          if (!isSettingsRecord(rawSettings)) {
+            logWarning(
+              "settings-sync",
+              this.manifest.id,
+              "ignored missing or invalid external settings data",
+            );
+            continue;
+          }
+          if (!isSupportedSettingsSchema(rawSettings)) {
+            logWarning(
+              "settings-sync",
+              this.manifest.id,
+              "ignored external settings with an unsupported schema version",
+            );
+            continue;
+          }
+
+          const externalApply = this.settingsPersistence.applyExternal(
+            externalRead,
+            normalizeSettings(rawSettings),
+          );
+          if (!externalApply.applied) {
+            this.pendingExternalSettingsChange = true;
+            continue;
+          }
+          this.applyRuntimeSettings();
+          if (externalApply.changed > 0) {
+            this.settingTab?.refreshAfterExternalSettingsChange();
+          }
+          logDiagnostic(
+            "settings-sync",
+            this.manifest.id,
+            externalApply.changed > 0
+              ? `applied ${externalApply.changed} externally changed field${externalApply.changed === 1 ? "" : "s"}`
+              : "external settings already current",
+          );
+        } catch (error) {
+          logError(
+            "settings-sync",
+            this.manifest.id,
+            "external settings reload failed",
+            error,
+          );
+        }
+      }
+    } finally {
+      this.externalSettingsReloadPromise = null;
+    }
+  }
+
+  private applyRuntimeSettings(): void {
     setDiagnosticsEnabled(this.settings.diagnostics);
     if (!this.settings.lintOnSave) {
       this.saveLintScheduler?.cancelPending();
       this.saveLintFeedback.clear();
     }
-    await this.saveData(this.settings);
   }
 
   private queueSaveLint(

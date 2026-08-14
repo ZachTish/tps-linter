@@ -1,10 +1,10 @@
 # TPS Linter
 
-TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.7.1` prevents heading capitalization from changing case-sensitive tags, links, forward-slash paths, URLs, URIs, inline code, and related inline syntax. Every released command, setting, rule, fail-closed guard, protected-Markdown contract, save-feedback behavior, and ownership-safe filename behavior remains available.
+TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.7.2` immediately applies settings downloaded by Obsidian Sync for the same remote vault and makes local settings writes merge-safe, so one device does not restore stale choices over another. Every released command, setting, rule, fail-closed guard, protected-Markdown contract, save-feedback behavior, and ownership-safe filename behavior remains available.
 
 ## Install with BRAT
 
-Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.7.1`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
+Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.7.2`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
 
 The released build is validated in the isolated Obsidian Plugin Test Vault. Publishing the release does not install it in the production vault; the production update remains a separate user-owned BRAT pull.
 
@@ -21,7 +21,7 @@ TPS Linter takes inspiration from upstream's consecutive-blank-line, list-marker
 - The same two actions are available in a Markdown file's context menu and at the top of the settings page.
 - **Lint notes on save** is enabled by default. After Obsidian reports that the active Markdown editor was persisted, or after the standard platform save gesture (Cmd-S on Apple devices and Ctrl-S elsewhere) inside that editor, TPS Linter waits 500 ms, coalesces repeated events, rechecks the live note and editor buffer, and applies enabled content rules when the editor is still active, saved, and eligible.
 
-Save linting is content-only: it never plans or applies a filename change and never turns an external or sync burst into a whole-vault cleanup. Enabling the save workflow does not enable individual cleanup rules; default-off rules such as plain-note body spacing, after-frontmatter body spacing, and list-item compaction must also be enabled on each device. A native top-right Obsidian notice briefly lists successfully applied changes. It names at most three cleanup actions, then gives the exact number of remaining fixes, and has a 180-character ceiling. An explicit conventional Cmd-S/Ctrl-S inside the active editor reports no changes under the rules enabled on that device, note-local disablement, or a safety block when it produces no mutation. When the note has a missing frontmatter body line, missing plain-note body line, or compactable list gap whose relevant opt-in rule is off, that explicit notice names the disabled cleanup instead of implying that save lint failed. Routine persisted-modification no-ops and the plugin's own convergence pass remain silent, so one automatic clean never produces a second “already clean” message. Excluded, inactive, preview-only, and unsaved-buffer targets are still skipped without a misleading success notice. There is no startup scan, batch mutation command, paste hook, or inactive-note sweep.
+Save linting is content-only: it never plans or applies a filename change and never turns an external or sync burst into a whole-vault cleanup. Enabling the save workflow does not enable individual cleanup rules; default-off rules such as plain-note body spacing, after-frontmatter body spacing, and list-item compaction must also be enabled locally or downloaded through same-remote-vault settings sync. A native top-right Obsidian notice briefly lists successfully applied changes. It names at most three cleanup actions, then gives the exact number of remaining fixes, and has a 180-character ceiling. An explicit conventional Cmd-S/Ctrl-S inside the active editor reports no changes under the rules enabled on that device, note-local disablement, or a safety block when it produces no mutation. When the note has a missing frontmatter body line, missing plain-note body line, or compactable list gap whose relevant opt-in rule is off, that explicit notice names the disabled cleanup instead of implying that save lint failed. Routine persisted-modification no-ops and the plugin's own convergence pass remain silent, so one automatic clean never produces a second “already clean” message. Excluded, inactive, preview-only, and unsaved-buffer targets are still skipped without a misleading success notice. There is no startup scan, batch mutation command, paste hook, or inactive-note sweep.
 
 ## Filename rules and ownership
 
@@ -52,7 +52,7 @@ The default Markdown cleanup:
 
 **Remove blank lines between list items** is a separate default-off rule. It removes every ASCII space/tab blank-only line between compatible unordered, ordered, or checklist markers, producing a compact Markdown list. Unordered items must keep the same `-`, `+`, or `*` marker; ordered items must keep the same `.` or `)` delimiter; checklists compact with other checklists regardless of status. Both items must have the same provable indentation and blockquote path. The rule preserves plain-to-checklist transitions, mixed marker families, empty or thematic-break-like markers, continuation paragraphs, bare blank lines between quoted blocks, four-space or tab-indented ambiguity, frontmatter, code, math, comments, raw HTML, Templater, disabled ranges, and any line the protected-syntax scanner cannot safely classify. It preserves LF, CRLF, CR, and a byte-zero BOM, reports its own removal count, and remains idempotent when combined with the general blank-line rules.
 
-Removing the final separator changes an eligible CommonMark list from loose to tight, so this rule is never enabled automatically during installation or migration. Enable it under **TPS Linter → Clean notes** on each device whose settings should compact lists.
+Removing the final separator changes an eligible CommonMark list from loose to tight, so this rule is never enabled automatically during installation or migration. Enable it under **TPS Linter → Clean notes**, or let that choice download through Obsidian Sync between devices connected to the same remote vault.
 
 **Add blank line before plain-note content** is a separate default-off rule for notes without frontmatter. It inserts one empty physical first line before nonblank content, reuses the first existing LF, CRLF, or CR ending, and falls back to LF only for a one-line unterminated note. It leaves an existing empty or whitespace-only first line alone and never manufactures content in an empty, BOM-only, or blank-only note. A UTF-8 BOM remains byte zero and the separator follows it. Any exact first-line `---` opener is never displaced—even when its YAML is malformed, unsafe, or unclosed—because Obsidian requires frontmatter to remain on line one.
 
@@ -137,11 +137,15 @@ Check and Clean actions remain first. The always-visible **Choose what to config
 1. **Clean notes** — lint-on-save workflow, body-start spacing, general and list-item blank lines, whitespace, and final newline;
 2. **Headings** — capitalization, hierarchy normalization, H1/H2 start, and optional bottom alignment to H6;
 3. **Frontmatter** — safe top-level sorting and the GCM property-order handoff; and
-4. **Files & safety** — filename rules, ownership, exclusions, note-local control reference, and diagnostics.
+4. **Files & safety** — settings-sync scope, filename rules, ownership, exclusions, note-local control reference, and diagnostics.
 
 **Clean notes** is the default route. Only the active destination is rendered, with one conditional control for the first heading level. Route, focus, disclosure, and scroll state are transient and create no persisted fields. Route buttons use `aria-pressed`; focus is restored after user-invoked rerenders; keyboard focus is visible. On narrow screens the route hub is a horizontally scrollable strip, action cards stack, controls use full width, and labels wrap. Every CSS selector is namespaced under `tps-linter`.
 
 Persisted data uses schema version `7` and contains only workflow/rule choices, exclusion patterns, and the diagnostics toggle. Unknown or invalid saved values normalize to safe defaults. Loading schema v1 preserves custom exclusions and appends `_templates` and `System/Templates`; later schemas preserve intentional exclusion removals and existing rule choices. Schema-v6 and older installations retain every existing choice and receive `removeBlankLinesBetweenListItems: false`, so list compaction is opt-in.
+
+Obsidian Sync settings are vault-scoped. When **Community plugins** and their settings are enabled in Obsidian Sync on every device connected to the same remote vault, TPS Linter applies a downloaded `data.json` immediately through Obsidian's supported external-settings callback; no TPS Linter reload is required after the file arrives. Obsidian's Sync selections are device-local, and changing those selections may require restarting or force-quitting Obsidian. Independent vaults and separate remote vaults keep independent TPS Linter settings; TPS Linter has no custom network service, account-wide profile, or hidden bridge between the test and production vaults.
+
+Local setting changes are serialized, reread the newest available plugin data, and merge only locally changed top-level fields. This preserves compatible unknown fields and settings downloaded from another device. Stale external reads are discarded and reread, dirty local intent survives a failed write, and a temporarily missing established settings file fails closed instead of being replaced by a partial record. Applying external settings never writes them reflexively, lints a note, scans the vault, or changes runtime-owned data outside TPS Linter's normal `data.json` contract.
 
 ## Diagnostics and safety
 
@@ -167,6 +171,7 @@ Bounded-work guards reject notes over 2,000,000 characters or 50,000 physical li
 - **Check current note** reads fresh persisted vault bytes but remains a read-only snapshot; it intentionally does not inspect newer, unsaved editor text. **Clean current note** re-reads and processes the live file atomically. A rare target collision with a same-named folder is caught by Obsidian's guarded rename and reported as a partial result rather than being included in the sibling-file preflight.
 - Mobile layout is covered by responsive contract tests and desktop-width inspection; final native iOS interaction remains a separate device check.
 - The conventional Cmd-S/Ctrl-S gesture can lint an unchanged open note because the key gesture is observable. A user-remapped Save command, menu-based no-op Save, or other no-op invocation that emits neither that gesture nor a Vault modification does not create a public Obsidian save event and therefore cannot be detected.
+- Obsidian's native plugin-settings Sync connects devices for one remote vault; it does not provide account-wide settings across independent vaults. Transfer between separate vaults remains an explicit user-owned configuration action.
 
 ## Development and validation
 
@@ -187,6 +192,10 @@ npm run build
 ```
 
 Stable production-mode builds deploy byte-changed `main.js`, `manifest.json`, and `styles.css` only to the isolated test runtime `.obsidian/plugins/tps-linter`. They do not overwrite runtime-owned `data.json`. Direct production deployment is not part of this workflow.
+
+### 0.7.2 validation
+
+Validation covers immediate external-settings application without writeback, same-remote-vault scope copy, serialized changed-field persistence, compatible unknown-field retention, rapid edits and old-new-old intent, concurrent local/external ownership, stale-read rejection and reread, failed-write dirty-intent preservation, first-save creation, transient missing-data failure, future/malformed schema rejection, lifecycle guards, open-settings refresh, TypeScript, the complete declared suite, a separate production build, isolated runtime deployment, and reloaded test-vault external-change QA. Exact final counts, hashes, reload evidence, settings restoration, and production non-access are recorded in `release-notes/0.7.2.md`.
 
 ### 0.7.1 validation
 
@@ -265,6 +274,14 @@ Validation covers safe YAML CST sorting and semantic verification, GCM property-
 Validation covers pure filename planning and collision/ownership guards, TPS filename preservation, exact line-ending and protected-block preservation, idempotence, settings normalization, command and settings contracts, TypeScript, the complete declared suite, a separate final production-mode build, runtime deployment, and a reloaded test-vault UI inspection. Exact final test counts, reload evidence, and artifact hashes are recorded in `release-notes/0.1.0.md`.
 
 ## Version history
+
+### 0.7.2
+
+- Applies settings downloaded by Obsidian Sync without requiring a TPS Linter reload when devices are connected to the same remote vault and community-plugin settings sync is enabled on each device.
+- Serializes local settings writes and merges only locally changed fields into the newest plugin data, preserving compatible unknown fields and concurrent choices from other devices.
+- Rejects stale external reads, preserves unsaved local intent across a failed write, and fails closed when an established settings file is temporarily missing or has an unsupported schema.
+- Refreshes an open TPS Linter settings page after an external update without enabling rules, linting notes, scanning the vault, or writing the downloaded settings back.
+- Clarifies in the settings UI that Obsidian Sync is vault-scoped: separate vaults and remote vaults keep separate TPS Linter settings.
 
 ### 0.7.1
 

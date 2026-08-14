@@ -15,6 +15,7 @@ const gcmCompatSource = readFileSync(new URL("../src/gcm-compat.ts", import.meta
 const lintControlsSource = readFileSync(new URL("../src/lint-controls.ts", import.meta.url), "utf8");
 const optInSuggestionsSource = readFileSync(new URL("../src/opt-in-suggestions.ts", import.meta.url), "utf8");
 const saveLintSchedulerSource = readFileSync(new URL("../src/save-lint-scheduler.ts", import.meta.url), "utf8");
+const settingsPersistenceSource = readFileSync(new URL("../src/settings-persistence.ts", import.meta.url), "utf8");
 const settingsTabSource = readFileSync(new URL("../src/settings-tab.ts", import.meta.url), "utf8");
 const vaultFileIdentitySource = readFileSync(new URL("../src/vault-file-identity.ts", import.meta.url), "utf8");
 const stylesSource = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
@@ -25,7 +26,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.7.1",
+    version: "0.7.2",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
@@ -60,6 +61,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.6.2": "1.10.0",
     "0.7.0": "1.10.0",
     "0.7.1": "1.10.0",
+    "0.7.2": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -68,6 +70,75 @@ test("TPS Linter release metadata is aligned", () => {
 test("TPS Linter exposes explicit check and clean commands", () => {
   assert.match(mainSource, /name:\s*["']Check current note["']/);
   assert.match(mainSource, /name:\s*["']Clean current note["']/);
+});
+
+test("settings sync hot-reloads external data and local writes stay merge-safe", () => {
+  const saveSettingsSource = sourceBetween(
+    mainSource,
+    "  async saveSettings(): Promise<void> {",
+    "  async onExternalSettingsChange(): Promise<void> {",
+  );
+  const externalHookSource = sourceBetween(
+    mainSource,
+    "  async onExternalSettingsChange(): Promise<void> {",
+    "  private startExternalSettingsReload(): void {",
+  );
+  const externalReloadSource = sourceBetween(
+    mainSource,
+    "  private async reloadExternalSettings(): Promise<void> {",
+    "  private applyRuntimeSettings(): void {",
+  );
+
+  assert.match(saveSettingsSource, /this\.settingsPersistence\.request\(this\.settings\)/);
+  assert.doesNotMatch(saveSettingsSource, /this\.saveData\(/);
+  assert.match(externalHookSource, /this\.pendingExternalSettingsChange = true/);
+  assert.match(externalHookSource, /this\.settingsReady/);
+  assert.match(externalHookSource, /this\.saveLintLifecycle\.isActive\(\)/);
+  assert.match(externalHookSource, /this\.startExternalSettingsReload\(\)/);
+  assert.doesNotMatch(externalHookSource, /this\.saveData\(/);
+  assert.ok(
+    externalReloadSource.indexOf("await this.settingsPersistence.waitForIdle()") <
+      externalReloadSource.indexOf("const rawSettings = await this.loadData()"),
+    "external reload must serialize behind local settings persistence",
+  );
+  assert.match(externalReloadSource, /this\.settingsPersistence\.applyExternal\(/);
+  assert.match(externalReloadSource, /this\.settingsPersistence\.captureExternalRead\(\)/);
+  assert.match(
+    externalReloadSource,
+    /catch \(error\)\s*\{[\s\S]*local settings persistence did not finish before external reload[\s\S]*const externalRead = this\.settingsPersistence\.captureExternalRead\(\)/,
+    "a failed local write must not consume the external reload notification",
+  );
+  assert.match(externalReloadSource, /isSupportedSettingsSchema\(rawSettings\)/);
+  assert.match(
+    externalReloadSource,
+    /if \(!externalApply\.applied\)\s*\{\s*this\.pendingExternalSettingsChange = true;\s*continue;/,
+  );
+  assert.match(externalReloadSource, /this\.applyRuntimeSettings\(\)/);
+  assert.match(
+    externalReloadSource,
+    /this\.settingTab\?\.refreshAfterExternalSettingsChange\(\)/,
+  );
+  assert.doesNotMatch(externalReloadSource, /this\.saveData\(/);
+  assert.doesNotMatch(externalReloadSource, /this\.settingsPersistence\.request\(/);
+  assert.match(
+    externalReloadSource,
+    /finally\s*\{\s*this\.externalSettingsReloadPromise = null;\s*\}/,
+    "external reload ownership must clear inside the drain's own finalizer",
+  );
+
+  assert.match(settingsPersistenceSource, /const KNOWN_SETTINGS_KEYS = Object\.keys\(DEFAULT_SETTINGS\)/);
+  assert.match(settingsPersistenceSource, /await this\.options\.loadLatest\(\)/);
+  assert.match(settingsPersistenceSource, /for \(const key of requested\.intentKeys\)/);
+  assert.match(settingsPersistenceSource, /await this\.options\.saveMerged\(mergedRaw\)/);
+  assert.match(settingsPersistenceSource, /this\.createFirstPersistedRecord\(requested\.snapshot\)/);
+  assert.match(settingsPersistenceSource, /TPS Linter settings data is temporarily unavailable/);
+  assert.match(settingsPersistenceSource, /unknown fields owned by newer compatible releases/);
+  assert.doesNotMatch(settingsPersistenceSource, /setInterval|\.adapter\.|\.vault\./);
+
+  assert.match(settingsTabSource, /renderSettingsSync\(destination\)/);
+  assert.match(settingsTabSource, /same remote vault/);
+  assert.match(settingsTabSource, /Separate vaults keep separate settings/);
+  assert.match(settingsTabSource, /refreshAfterExternalSettingsChange/);
 });
 
 test("leading blank-line cleanup is wired through settings, runtime, and reporting", () => {

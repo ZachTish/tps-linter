@@ -42,7 +42,7 @@ const SETTINGS_DESTINATIONS: ReadonlyArray<{
   {
     id: "files-safety",
     label: "Files & safety",
-    description: "Names, scope, and diagnostics",
+    description: "Names, sync, scope, and diagnostics",
   },
 ];
 
@@ -87,6 +87,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
         this.renderFrontmatterRules(destination);
         break;
       case "files-safety":
+        this.renderSettingsSync(destination);
         this.renderOwnership(destination);
         this.renderFilenameRules(destination);
         this.renderScope(destination);
@@ -94,6 +95,14 @@ export class TPSLinterSettingTab extends PluginSettingTab {
         this.renderDiagnostics(destination);
         break;
     }
+  }
+
+  refreshAfterExternalSettingsChange(): void {
+    if (!this.containerEl.isConnected) return;
+    this.display();
+    this.statusEl?.setText(
+      "Settings updated from Obsidian Sync or another external change.",
+    );
   }
 
   private renderActions(parent: HTMLElement): void {
@@ -181,6 +190,15 @@ export class TPSLinterSettingTab extends PluginSettingTab {
       .onClick(() => this.openPluginSettings("tps-global-context-menu"));
   }
 
+  private renderSettingsSync(parent: HTMLElement): void {
+    parent.createEl("h3", { text: "Settings sync" });
+    new Setting(parent)
+      .setName("Obsidian Sync scope")
+      .setDesc(
+        "Downloaded settings apply without reloading TPS Linter when community plugins and their settings are synced on every device connected to the same remote vault. Sync choices are device-local. Separate vaults keep separate settings.",
+      );
+  }
+
   private renderFilenameRules(parent: HTMLElement): void {
     parent.createEl("h3", { text: "Filename rules" });
 
@@ -241,7 +259,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
 
     new Setting(parent)
       .setName("Add blank line before plain-note content")
-      .setDesc("In notes without frontmatter, insert one empty line before the first body content. This opt-in rule is off by default and must be enabled on each device.")
+      .setDesc("In notes without frontmatter, insert one empty line before the first body content. This opt-in rule stays off until enabled locally or downloaded through same-remote-vault settings sync.")
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.ensureBlankLineAtBeginning)
@@ -253,7 +271,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
 
     new Setting(parent)
       .setName("Add blank body line after frontmatter")
-      .setDesc("Insert one empty, editable line immediately below the closing --- (or ...) in valid top-of-note frontmatter, including metadata-only notes. This opt-in rule is off by default and must be enabled on each device.")
+      .setDesc("Insert one empty, editable line immediately below the closing --- (or ...) in valid top-of-note frontmatter, including metadata-only notes. This opt-in rule stays off until enabled locally or downloaded through same-remote-vault settings sync.")
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.ensureBlankLineAfterFrontmatter)
@@ -277,7 +295,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
 
     new Setting(parent)
       .setName("Remove blank lines between list items")
-      .setDesc("Remove blank-only separators between same-indentation Markdown list items and checklists. This opt-in rule is off by default and must be enabled on each device; nested transitions, mixed list types, continuation paragraphs, and protected regions stay unchanged.")
+      .setDesc("Remove blank-only separators between same-indentation Markdown list items and checklists. This opt-in rule stays off until enabled locally or downloaded through same-remote-vault settings sync; nested transitions, mixed list types, continuation paragraphs, and protected regions stay unchanged.")
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.removeBlankLinesBetweenListItems)
