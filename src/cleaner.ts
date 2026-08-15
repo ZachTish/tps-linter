@@ -109,6 +109,7 @@ interface LineToken {
 interface ProcessedLineToken extends LineToken {
   protected: boolean;
   headingIndex?: number;
+  listItemSignature?: ListItemSignature;
 }
 
 interface ListItemSignature {
@@ -152,6 +153,7 @@ interface ProtectedConstructState {
 
 interface ProtectedConstructScan extends ProtectedConstructState {
   protected: boolean;
+  onlyHtmlCommentsProtectLine?: boolean;
   safetyBlockedReason?: string;
 }
 
@@ -820,8 +822,23 @@ function cleanMarkdownOnce(
       );
     }
     protectedConstructs = protectedState;
+    // A complete inline HTML comment keeps this line immutable, but its
+    // leading marker can still prove that an adjacent blank belongs to one
+    // list. Dynamic and structural protected syntax stays ineligible.
+    const listItemSignature =
+      options.removeBlankLinesBetweenListItems &&
+      !hasActiveProtectedConstruct(protectedState) &&
+      (!protectedState.protected ||
+        protectedState.onlyHtmlCommentsProtectLine === true)
+        ? readListItemSignature(token.body, index === 0) ?? undefined
+        : undefined;
     if (protectedState.protected) {
-      processedTokens.push({ ...token, protected: true, headingIndex });
+      processedTokens.push({
+        ...token,
+        protected: true,
+        headingIndex,
+        listItemSignature,
+      });
       continue;
     }
 
@@ -842,7 +859,12 @@ function cleanMarkdownOnce(
       }
     }
 
-    processedTokens.push({ ...token, protected: false, headingIndex });
+    processedTokens.push({
+      ...token,
+      protected: false,
+      headingIndex,
+      listItemSignature,
+    });
   }
 
   if (pushHeadingHierarchyToH6 && visibleHeadings.length > 0) {
@@ -1590,9 +1612,7 @@ function compactListItemBlankLines(
     }
     compacted.push(token);
 
-    const currentSignature = token.protected
-      ? null
-      : readListItemSignature(token.body, index === 0);
+    const currentSignature = token.listItemSignature ?? null;
     if (
       !currentSignature ||
       !isProvenListItem(
@@ -1625,10 +1645,7 @@ function compactListItemBlankLines(
     }
 
     const nextToken = tokens[nextIndex];
-    const nextSignature =
-      nextToken && !nextToken.protected
-        ? readListItemSignature(nextToken.body, nextIndex === 0)
-        : null;
+    const nextSignature = nextToken?.listItemSignature ?? null;
     if (
       nextSignature &&
       sameListItemSignature(currentSignature, nextSignature)
@@ -1700,10 +1717,7 @@ function isProvenListItem(
   }
 
   const previousToken = tokens[index - 1];
-  const previousSignature =
-    previousToken && !previousToken.protected
-      ? readListItemSignature(previousToken.body, index - 1 === 0)
-      : null;
+  const previousSignature = previousToken?.listItemSignature ?? null;
   return Boolean(
     previousSignature &&
       previousSignature.orderedNumber !== null &&
@@ -2125,6 +2139,7 @@ function scanProtectedConstructs(
   let cursor = 0;
   let protectedTokenCount = 0;
   let protectedLine = hasActiveProtectedConstruct(initialState);
+  let onlyHtmlCommentsProtectLine = !protectedLine;
 
   while (cursor < line.length) {
     if (comment === "obsidian") {
@@ -2299,6 +2314,12 @@ function scanProtectedConstructs(
       };
     }
 
+    if (
+      token.kind !== "html-comment" &&
+      (token.kind !== "inline-opaque" || token.protectLine === true)
+    ) {
+      onlyHtmlCommentsProtectLine = false;
+    }
     if (token.kind !== "inline-opaque" || token.protectLine === true) {
       protectedLine = true;
     }
@@ -2353,6 +2374,7 @@ function scanProtectedConstructs(
     htmlTags,
     referenceTitleMayContinue,
     protected: protectedLine,
+    onlyHtmlCommentsProtectLine,
   };
 }
 

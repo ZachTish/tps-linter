@@ -83,8 +83,67 @@ test("keeps safe inline Markdown opaque while compacting item boundaries", () =>
     "- [[One]] [scheduled:: 2026-08-11]\n- [Two](https://example.test) $x$\n",
     1,
   );
+});
 
-  assertPreserved("- `one`\n\n- `two`\n");
+test("keeps complete same-line HTML comments byte-identical while compacting their list boundary", () => {
+  for (const [input, expected] of [
+    [
+      "- [[Food one]] [calories:: 100] <!-- card metadata -->\n\n- [[Food two]] [calories:: 200] <!-- card metadata -->\n",
+      "- [[Food one]] [calories:: 100] <!-- card metadata -->\n- [[Food two]] [calories:: 200] <!-- card metadata -->\n",
+    ],
+    [
+      "- one <!-- first --> <!-- second -->\r\n\r\n- two <!-- third -->\r\n",
+      "- one <!-- first --> <!-- second -->\r\n- two <!-- third -->\r\n",
+    ],
+    ["- one <!-- card -->\n\n- two\n", "- one <!-- card -->\n- two\n"],
+    ["- one\n\n- two <!-- card -->\n", "- one\n- two <!-- card -->\n"],
+    [
+      "- [ ] one <!-- card -->\n\n- [x] two <!-- card -->\n",
+      "- [ ] one <!-- card -->\n- [x] two <!-- card -->\n",
+    ],
+    [
+      "> - one <!-- card -->\n>\n> - two <!-- card -->\n",
+      "> - one <!-- card -->\n> - two <!-- card -->\n",
+    ],
+    [
+      "1. one <!-- card -->\n2. two <!-- card -->\n\n3. three <!-- card -->\n",
+      "1. one <!-- card -->\n2. two <!-- card -->\n3. three <!-- card -->\n",
+    ],
+    [
+      "\uFEFF- one <!-- card -->\r\r- two <!-- card -->",
+      "\uFEFF- one <!-- card -->\r- two <!-- card -->",
+    ],
+  ] as const) {
+    assertCompacted(input, expected, 1);
+  }
+});
+
+test("other same-line protected syntax remains ineligible for list-boundary compaction", () => {
+  for (const input of [
+    "- `one`\n\n- `two`\n",
+    "- one %% private %%\n\n- two %% private %%\n",
+    "- <% one %>\n\n- <% two %>\n",
+    "- <span>one</span>\n\n- <span>two</span>\n",
+    "- <?one?>\n\n- <?two?>\n",
+    "- <![CDATA[one]]>\n\n- <![CDATA[two]]>\n",
+    "- one <!-- safe --> <% dynamic %>\n\n- two <!-- safe -->\n",
+    "- one <!-- safe --> `code`\n\n- two <!-- safe -->\n",
+    "- one <!-- safe --> %% private %%\n\n- two <!-- safe -->\n",
+    "- one <!-- safe --> <span>html</span>\n\n- two <!-- safe -->\n",
+  ]) {
+    assertPreserved(input);
+  }
+});
+
+test("multiline protected constructs still block list-boundary compaction", () => {
+  for (const input of [
+    "- one <!-- open\n\n- two\n-->\n",
+    "- one %% open\n\n- two\n%%\n",
+    "- `<code\n\n- still code\n`\n",
+    "- <span>open\n\n- still inside\n</span>\n",
+  ]) {
+    assertPreserved(input);
+  }
 });
 
 test("preserves exact line endings and a byte-zero BOM", () => {
@@ -127,6 +186,9 @@ test("preserves incompatible, empty, ambiguous, and thematic-break boundaries", 
     "Paragraph - one\n\nParagraph - two\n",
     "The number is\n2. paragraph continuation\n\n3. actual list\n",
     "> The number is\n> 2. paragraph continuation\n>\n> 3. actual list\n",
+    "- plain <!-- card -->\n\n- [ ] task <!-- card -->\n",
+    "- one <!-- card -->\n\n+ two <!-- card -->\n",
+    "The number is\n2. paragraph <!-- card -->\n\n3. list <!-- card -->\n",
     "\u00a0\n\n\u00a0\n",
   ]) {
     assertPreserved(input);

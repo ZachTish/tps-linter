@@ -295,7 +295,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
 
     new Setting(parent)
       .setName("Remove blank lines between list items")
-      .setDesc("Remove blank-only separators between same-indentation Markdown list items and checklists. This opt-in rule stays off until enabled locally or downloaded through same-remote-vault settings sync; nested transitions, mixed list types, continuation paragraphs, and protected regions stay unchanged.")
+      .setDesc("Remove blank-only separators between same-indentation Markdown list items and checklists. Eligible items may contain complete same-line HTML comments; item text stays byte-identical. This opt-in rule stays off until enabled locally or downloaded through same-remote-vault settings sync. Nested transitions, mixed list types, continuation paragraphs, and multiline or other protected regions stay unchanged.")
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.removeBlankLinesBetweenListItems)

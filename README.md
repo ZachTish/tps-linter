@@ -1,10 +1,10 @@
 # TPS Linter
 
-TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.7.2` immediately applies settings downloaded by Obsidian Sync for the same remote vault and makes local settings writes merge-safe, so one device does not restore stale choices over another. Every released command, setting, rule, fail-closed guard, protected-Markdown contract, save-feedback behavior, and ownership-safe filename behavior remains available.
+TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.7.3` removes eligible list-item gaps when TPS record lines contain complete same-line HTML comments, while keeping both item lines and every other protected-syntax boundary unchanged. Every released command, setting, rule, fail-closed guard, settings-sync behavior, save-feedback behavior, and ownership-safe filename behavior remains available.
 
 ## Install with BRAT
 
-Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.7.2`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
+Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.7.3`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
 
 The released build is validated in the isolated Obsidian Plugin Test Vault. Publishing the release does not install it in the production vault; the production update remains a separate user-owned BRAT pull.
 
@@ -50,7 +50,7 @@ The default Markdown cleanup:
 - adds a missing final newline to a non-empty file; and
 - leaves nonblank trailing whitespace and terminal blank padding alone unless the user explicitly enables those rules.
 
-**Remove blank lines between list items** is a separate default-off rule. It removes every ASCII space/tab blank-only line between compatible unordered, ordered, or checklist markers, producing a compact Markdown list. Unordered items must keep the same `-`, `+`, or `*` marker; ordered items must keep the same `.` or `)` delimiter; checklists compact with other checklists regardless of status. Both items must have the same provable indentation and blockquote path. The rule preserves plain-to-checklist transitions, mixed marker families, empty or thematic-break-like markers, continuation paragraphs, bare blank lines between quoted blocks, four-space or tab-indented ambiguity, frontmatter, code, math, comments, raw HTML, Templater, disabled ranges, and any line the protected-syntax scanner cannot safely classify. It preserves LF, CRLF, CR, and a byte-zero BOM, reports its own removal count, and remains idempotent when combined with the general blank-line rules.
+**Remove blank lines between list items** is a separate default-off rule. It removes every ASCII space/tab blank-only line between compatible unordered, ordered, or checklist markers, producing a compact Markdown list. Unordered items must keep the same `-`, `+`, or `*` marker; ordered items must keep the same `.` or `)` delimiter; checklists compact with other checklists regardless of status. Both items must have the same provable indentation and blockquote path. Eligible item text may contain inline fields, links, inline math, and complete HTML comments that open and close on that same physical line. Those item lines remain byte-identical; only the intervening blank tokens are removed. The rule preserves plain-to-checklist transitions, mixed marker families, empty or thematic-break-like markers, continuation paragraphs, bare blank lines between quoted blocks, four-space or tab-indented ambiguity, frontmatter, code, math blocks, inline code, Obsidian comments, multiline or unclosed HTML comments, generic and raw HTML, Templater, disabled ranges, and any line the protected-syntax scanner cannot safely classify. It preserves LF, CRLF, CR, and a byte-zero BOM, reports its own removal count, and remains idempotent when combined with the general blank-line rules.
 
 Removing the final separator changes an eligible CommonMark list from loose to tight, so this rule is never enabled automatically during installation or migration. Enable it under **TPS Linter → Clean notes**, or let that choice download through Obsidian Sync between devices connected to the same remote vault.
 
@@ -161,7 +161,7 @@ Bounded-work guards reject notes over 2,000,000 characters or 50,000 physical li
 
 - Filename mutation is deliberately blocked while TPS Global Context Menu automatic rename is active.
 - There is no batch clean, inactive-note background sweep, diff modal, Setext-heading rewrite, or custom regular-expression rule.
-- List-item gap cleanup is deliberately limited to compatible markers with the same provable indentation and blockquote path. Four-space and tab-indented marker-like lines, mixed marker families, plain/checklist transitions, continuation content, and protected syntax remain unchanged rather than being guessed at.
+- List-item gap cleanup is deliberately limited to compatible markers with the same provable indentation and blockquote path. Complete same-line HTML comments are the sole protected-line exception, and their bytes stay unchanged. Four-space and tab-indented marker-like lines, mixed marker families, plain/checklist transitions, continuation content, inline code, Obsidian comments, Templater, generic/raw HTML, multiline comments, and other protected syntax remain unchanged rather than being guessed at.
 - Frontmatter sorting intentionally skips advanced YAML features that cannot be moved and verified with high confidence.
 - Multiline HTML tags and multiline Markdown link/reference forms are deliberately blocked when the lightweight scanner cannot prove their boundaries. Tag-like shortcut reference labels also require manual review because the scanner does not resolve document-wide reference definitions.
 - Heading text changes can affect explicit heading-fragment links. Heading-level normalization separately changes outline and section structure. Because lint on save is enabled by default, disable the relevant heading rule, disable `lintOnSave`, or use note-local rule controls where text or structure must remain fixed.
@@ -192,6 +192,10 @@ npm run build
 ```
 
 Stable production-mode builds deploy byte-changed `main.js`, `manifest.json`, and `styles.css` only to the isolated test runtime `.obsidian/plugins/tps-linter`. They do not overwrite runtime-owned `data.json`. Direct production deployment is not part of this workflow.
+
+### 0.7.3 validation
+
+Validation covers the exact TPS record shape with inline fields and complete same-line HTML comments; comments on one or both endpoints; multiple comments; bullet, ordered, checklist, nested, and blockquote markers; ASCII blank runs; LF, CRLF, CR, BOM, and missing-final-ending preservation; exact item-byte preservation; counters; idempotence; marker/task/continuation/ordered-proof guards; and fail-closed preservation for inline code, Obsidian comments, Templater, generic/raw/delimited HTML, mixed protected families, multiline comments, frontmatter, fences, math, indented code, and disabled ranges. Exact final counts, hashes, reload evidence, save notices, settings preservation, QA-note disposition, and production non-mutation are recorded in `release-notes/0.7.3.md`.
 
 ### 0.7.2 validation
 
@@ -274,6 +278,13 @@ Validation covers safe YAML CST sorting and semantic verification, GCM property-
 Validation covers pure filename planning and collision/ownership guards, TPS filename preservation, exact line-ending and protected-block preservation, idempotence, settings normalization, command and settings contracts, TypeScript, the complete declared suite, a separate final production-mode build, runtime deployment, and a reloaded test-vault UI inspection. Exact final test counts, reload evidence, and artifact hashes are recorded in `release-notes/0.1.0.md`.
 
 ## Version history
+
+### 0.7.3
+
+- Removes blank-only gaps between otherwise compatible list items whose TPS record text contains complete same-line HTML comments.
+- Keeps every item line, inline field, link, comment, marker, and line ending byte-identical while removing only the eligible blank separator.
+- Retains fail-closed behavior for inline code, Obsidian comments, Templater, generic/raw/delimited HTML, multiline comments, mixed marker/task types, ambiguous indentation, continuation content, and protected regions.
+- Changes no setting key, default, rule ID, command, schema field, exclusion, filename behavior, or minimum Obsidian requirement.
 
 ### 0.7.2
 

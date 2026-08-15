@@ -26,7 +26,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.7.2",
+    version: "0.7.3",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
@@ -62,6 +62,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.7.0": "1.10.0",
     "0.7.1": "1.10.0",
     "0.7.2": "1.10.0",
+    "0.7.3": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -166,6 +167,9 @@ test("list-item blank-line cleanup is opt-in and wired end to end", () => {
     /removeBlankLinesBetweenListItems:\s*this\.settings\.removeBlankLinesBetweenListItems/,
   );
   assert.match(cleanerSource, /function compactListItemBlankLines\(/);
+  assert.match(cleanerSource, /onlyHtmlCommentsProtectLine/);
+  assert.match(cleanerSource, /token\.kind !== "html-comment"/);
+  assert.match(cleanerSource, /token\.protectLine === true/);
   assert.match(cleanerSource, /!disabledRules\.has\("list-item-blank-lines"\)/);
   assert.match(mainSource, /blank .*between list items/);
   assert.match(
@@ -176,6 +180,9 @@ test("list-item blank-line cleanup is opt-in and wired end to end", () => {
     settingsTabSource,
     /setValue\(this\.plugin\.settings\.removeBlankLinesBetweenListItems\)/,
   );
+  assert.match(settingsTabSource, /complete same-line HTML comments/);
+  assert.match(settingsTabSource, /item text stays byte-identical/);
+  assert.match(settingsTabSource, /multiline or other protected regions stay unchanged/);
   assert.match(
     allSource,
     /removeBlankLinesBetweenListItems:\s*false/,

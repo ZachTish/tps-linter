@@ -1,7 +1,7 @@
 {
   "id": "tps-linter",
   "name": "TPS Linter",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "minAppVersion": "1.10.0",
   "description": "TPS-specific note and filename cleanup with safe active-note linting.",
   "author": "Zach Tisherman",
