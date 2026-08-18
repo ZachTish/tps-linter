@@ -8,6 +8,7 @@ import {
   editorContentMatchesFile,
   editorContentNeedsNormalization,
   isManualSaveShortcut,
+  isPageFocusEntry,
 } from "../src/save-lint-scheduler.ts";
 
 function deferred(): {
@@ -105,6 +106,13 @@ test("recognizes only the exact platform save modifier", () => {
   ] as const) {
     assert.equal(isManualSaveShortcut(event, useMetaKey), false);
   }
+});
+
+test("recognizes only focus entering the active page", () => {
+  assert.equal(isPageFocusEntry(true, false), true);
+  assert.equal(isPageFocusEntry(true, true), false);
+  assert.equal(isPageFocusEntry(false, false), false);
+  assert.equal(isPageFocusEntry(false, true), false);
 });
 
 test("editor/file comparison exactly matches the former normalization semantics", () => {

@@ -60,6 +60,7 @@ import {
   SaveLintScheduler,
   editorContentMatchesFile,
   isManualSaveShortcut,
+  isPageFocusEntry,
 } from "./save-lint-scheduler";
 import {
   formatExplicitSaveNoChangeNotice,
@@ -95,7 +96,7 @@ export default class TPSLinterPlugin extends Plugin {
   settings!: TPSLinterSettings;
   private readonly activeCleans = new WeakSet<TFile>();
   private readonly saveLintFeedback = new SaveLintFeedbackTracker<TFile>();
-  private readonly saveShortcutObservers = new Map<Document, Component>();
+  private readonly autoLintObservers = new Map<Document, Component>();
   private readonly saveLintLifecycle = new SaveLintLifecycle();
   private readonly settingsPersistence = new TPSLinterSettingsPersistence({
     loadLatest: () => this.loadData(),
@@ -124,7 +125,7 @@ export default class TPSLinterPlugin extends Plugin {
             this.saveLintLifecycle.isCurrent(lifecycleGeneration) &&
             this.settings.lintOnSave
           ) {
-            new Notice("TPS Linter could not clean the saved note.", 5000);
+            new Notice("TPS Linter could not clean the active note.", 5000);
           }
         },
       },
@@ -149,25 +150,19 @@ export default class TPSLinterPlugin extends Plugin {
     });
 
     this.registerEvent(
-      this.app.vault.on("modify", (file: TAbstractFile) => {
-        this.queueSaveLint(file);
-      }),
-    );
-
-    this.registerEvent(
       this.app.workspace.on("window-open", (workspaceWindow) => {
-        this.observeSaveShortcuts(workspaceWindow.doc);
+        this.observeAutoLintTriggers(workspaceWindow.doc);
       }),
     );
     this.registerEvent(
       this.app.workspace.on("window-close", (workspaceWindow) => {
-        this.stopObservingSaveShortcuts(workspaceWindow.doc);
+        this.stopObservingAutoLintTriggers(workspaceWindow.doc);
       }),
     );
-    this.observeCurrentSaveShortcutDocuments();
+    this.observeCurrentAutoLintDocuments();
     this.app.workspace.onLayoutReady(() => {
       if (this.saveLintLifecycle.isCurrent(lifecycleGeneration)) {
-        this.observeCurrentSaveShortcutDocuments();
+        this.observeCurrentAutoLintDocuments();
       }
     });
 
@@ -205,21 +200,21 @@ export default class TPSLinterPlugin extends Plugin {
     }
   }
 
-  private observeCurrentSaveShortcutDocuments(): void {
+  private observeCurrentAutoLintDocuments(): void {
     const documents = new Set<Document>([document]);
     this.app.workspace.iterateAllLeaves((leaf) => {
       const container = leaf.getContainer();
       if (container?.doc) documents.add(container.doc);
     });
-    for (const doc of documents) this.observeSaveShortcuts(doc);
+    for (const doc of documents) this.observeAutoLintTriggers(doc);
   }
 
-  private observeSaveShortcuts(doc: Document): void {
-    if (this.saveShortcutObservers.has(doc)) return;
+  private observeAutoLintTriggers(doc: Document): void {
+    if (this.autoLintObservers.has(doc)) return;
     const eventWindow = doc.defaultView;
     if (!eventWindow) return;
     const observer = this.addChild(new Component());
-    this.saveShortcutObservers.set(doc, observer);
+    this.autoLintObservers.set(doc, observer);
 
     observer.registerDomEvent(
       eventWindow,
@@ -227,31 +222,61 @@ export default class TPSLinterPlugin extends Plugin {
       (event) => {
         if (!isManualSaveShortcut(event, Platform.isMacOS)) return;
 
-        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (
-          !view?.file ||
-          view.getMode() !== "source" ||
-          view.containerEl.doc !== doc
-        ) {
-          return;
-        }
-
-        const target = event.targetNode;
-        if (!target || !view.containerEl.contains(target)) {
-          return;
-        }
-
+        const view = this.getFocusedMarkdownView(doc, event.targetNode);
+        if (!view?.file) return;
         this.queueSaveLint(view.file, true);
       },
       { capture: true, passive: true },
     );
+
+    observer.registerDomEvent(
+      eventWindow,
+      "focusin",
+      (event) => {
+        const view = this.getFocusedMarkdownView(doc, event.targetNode);
+        if (!view?.file) return;
+
+        const previousTarget = event.relatedTarget;
+        const previousTargetInsideView =
+          previousTarget instanceof eventWindow.Node &&
+          view.containerEl.contains(previousTarget);
+        if (!isPageFocusEntry(true, previousTargetInsideView)) return;
+
+        this.queueSaveLint(view.file);
+      },
+      { capture: true, passive: true },
+    );
+
+    observer.registerDomEvent(
+      eventWindow,
+      "focus",
+      () => {
+        const view = this.getFocusedMarkdownView(doc, doc.activeElement);
+        if (view?.file) this.queueSaveLint(view.file);
+      },
+      { passive: true },
+    );
   }
 
-  private stopObservingSaveShortcuts(doc: Document): void {
-    const observer = this.saveShortcutObservers.get(doc);
+  private stopObservingAutoLintTriggers(doc: Document): void {
+    const observer = this.autoLintObservers.get(doc);
     if (!observer) return;
-    this.saveShortcutObservers.delete(doc);
+    this.autoLintObservers.delete(doc);
     this.removeChild(observer);
+  }
+
+  private getFocusedMarkdownView(
+    doc: Document,
+    target: Node | null,
+  ): MarkdownView | null {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    return view?.file &&
+      view.getMode() === "source" &&
+      view.containerEl.doc === doc &&
+      target !== null &&
+      view.containerEl.contains(target)
+      ? view
+      : null;
   }
 
   onunload(): void {
@@ -261,8 +286,8 @@ export default class TPSLinterPlugin extends Plugin {
     this.saveLintScheduler?.dispose();
     this.saveLintScheduler = null;
     this.saveLintFeedback.clear();
-    for (const doc of [...this.saveShortcutObservers.keys()]) {
-      this.stopObservingSaveShortcuts(doc);
+    for (const doc of [...this.autoLintObservers.keys()]) {
+      this.stopObservingAutoLintTriggers(doc);
     }
     this.settingTab = null;
     logDiagnostic("unload", this.manifest.id, "complete");

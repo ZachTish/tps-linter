@@ -27,7 +27,7 @@ const SETTINGS_DESTINATIONS: ReadonlyArray<{
   {
     id: "clean-notes",
     label: "Clean notes",
-    description: "Save workflow and body spacing",
+    description: "Explicit save, page focus, and body spacing",
   },
   {
     id: "headings",
@@ -65,7 +65,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
     containerEl.createEl("h2", { text: "TPS Linter" });
     containerEl.createEl("p", {
       cls: "tps-linter-settings-intro",
-      text: "Check or clean one Markdown note. Lint on save can automatically clean the active Markdown editor; TPS Linter never scans the whole vault.",
+      text: "Check or clean one Markdown note. Automatic linting runs only from an in-editor Cmd-S/Ctrl-S or focused-page entry; TPS Linter never reacts to background file changes or scans the whole vault.",
     });
 
     this.renderActions(containerEl);
@@ -246,8 +246,8 @@ export class TPSLinterSettingTab extends PluginSettingTab {
     parent.createEl("h3", { text: "Clean notes" });
 
     new Setting(parent)
-      .setName("Lint notes on save")
-      .setDesc("Automatically apply the rules enabled on this device to the active Markdown editor after Obsidian persists a modification or when you press the standard Cmd-S/Ctrl-S shortcut in that editor. A small notice lists applied changes; filename cleanup remains manual, and no whole-vault scan runs.")
+      .setName("Lint on explicit save or page focus")
+      .setDesc("Automatically apply the rules enabled on this device only when you press the standard Cmd-S/Ctrl-S shortcut inside the active Markdown editor or focus that page from outside it. Background file modifications do not trigger linting. A small notice lists applied changes; filename cleanup remains manual.")
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.lintOnSave)

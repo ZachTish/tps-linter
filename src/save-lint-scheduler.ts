@@ -90,6 +90,13 @@ export function isManualSaveShortcut(
   );
 }
 
+export function isPageFocusEntry(
+  targetInsideView: boolean,
+  previousTargetInsideView: boolean,
+): boolean {
+  return targetInsideView && !previousTargetInsideView;
+}
+
 export function editorContentMatchesFile(
   editorContent: string,
   fileContent: string,

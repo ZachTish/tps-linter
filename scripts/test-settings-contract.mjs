@@ -26,7 +26,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.7.3",
+    version: "0.7.4",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
@@ -63,6 +63,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.7.1": "1.10.0",
     "0.7.2": "1.10.0",
     "0.7.3": "1.10.0",
+    "0.7.4": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -190,7 +191,7 @@ test("list-item blank-line cleanup is opt-in and wired end to end", () => {
   );
 });
 
-test("save linting is active-note scoped and keeps automatic filename ownership with GCM", () => {
+test("automatic linting requires explicit save or focused-page entry and keeps filename ownership with GCM", () => {
   assert.match(
     settingsTabSource,
     /TPS Global Context Menu currently owns automatic title and filename synchronization\./,
@@ -200,10 +201,9 @@ test("save linting is active-note scoped and keeps automatic filename ownership 
 
   assert.equal(
     (mainSource.match(/\.vault\.on\(\s*["']modify["']/g) ?? []).length,
-    1,
-    "TPS Linter should register one supported modify hook",
+    0,
+    "background Vault modifications must not trigger TPS Linter",
   );
-  assert.match(mainSource, /this\.queueSaveLint\(file\)/);
   assert.doesNotMatch(
     allSource,
     /\.vault\.on\(\s*["'](?:create|rename|delete)["']/,
@@ -314,8 +314,8 @@ test("save linting is active-note scoped and keeps automatic filename ownership 
       unloadSource.indexOf("this.saveLintScheduler?.dispose()"),
     "unload must invalidate in-flight work before disposing queued work",
   );
-  assert.match(unloadSource, /this\.stopObservingSaveShortcuts\(doc\)/);
   assert.match(unloadSource, /this\.saveLintFeedback\.clear\(\)/);
+  assert.match(unloadSource, /this\.stopObservingAutoLintTriggers\(doc\)/);
 
   const onloadSource = sourceBetween(
     mainSource,
@@ -327,17 +327,22 @@ test("save linting is active-note scoped and keeps automatic filename ownership 
     /await this\.loadSettings\(\);\s*if \(!this\.saveLintLifecycle\.isCurrent\(lifecycleGeneration\)\)/,
     "onload must not initialize after an unload during settings I/O",
   );
-  assert.match(onloadSource, /this\.observeCurrentSaveShortcutDocuments\(\)/);
+  assert.match(onloadSource, /this\.observeCurrentAutoLintDocuments\(\)/);
   assert.match(onloadSource, /this\.app\.workspace\.iterateAllLeaves/);
   assert.match(onloadSource, /if \(container\?\.doc\) documents\.add\(container\.doc\)/);
   assert.match(onloadSource, /this\.app\.workspace\.on\("window-open"/);
   assert.match(onloadSource, /this\.app\.workspace\.on\("window-close"/);
   assert.match(onloadSource, /const eventWindow = doc\.defaultView/);
   assert.match(onloadSource, /observer\.registerDomEvent\(\s*eventWindow,\s*"keydown"/);
+  assert.match(onloadSource, /observer\.registerDomEvent\(\s*eventWindow,\s*"focusin"/);
+  assert.match(onloadSource, /observer\.registerDomEvent\(\s*eventWindow,\s*"focus"/);
   assert.match(onloadSource, /isManualSaveShortcut\(event, Platform\.isMacOS\)/);
-  assert.match(onloadSource, /view\.containerEl\.doc !== doc/);
-  assert.match(onloadSource, /view\.containerEl\.contains\(target\)/);
+  assert.match(onloadSource, /this\.getFocusedMarkdownView\(doc, event\.targetNode\)/);
+  assert.match(onloadSource, /event\.relatedTarget/);
+  assert.match(onloadSource, /isPageFocusEntry\(true, previousTargetInsideView\)/);
+  assert.match(onloadSource, /this\.getFocusedMarkdownView\(doc, doc\.activeElement\)/);
   assert.match(onloadSource, /this\.queueSaveLint\(view\.file, true\)/);
+  assert.match(onloadSource, /this\.queueSaveLint\(view\.file\)/);
   assert.match(onloadSource, /\{ capture: true, passive: true \}/);
   assert.doesNotMatch(onloadSource, /preventDefault|stopPropagation/);
 });
@@ -831,7 +836,10 @@ test("note-local controls, range markers, and idempotence gates remain stable", 
 });
 
 test("TPS Linter settings destinations stay accessible, responsive, and namespaced", () => {
-  assert.match(settingsTabSource, /setName\("Lint notes on save"\)/);
+  assert.match(settingsTabSource, /Explicit save, page focus, and body spacing/);
+  assert.match(settingsTabSource, /Automatic linting runs only from an in-editor Cmd-S\/Ctrl-S or focused-page entry/);
+  assert.match(settingsTabSource, /setName\("Lint on explicit save or page focus"\)/);
+  assert.match(settingsTabSource, /Background file modifications do not trigger linting\./);
   assert.match(settingsTabSource, /setName\("Add blank line before plain-note content"\)/);
   assert.match(settingsTabSource, /setName\("Add blank body line after frontmatter"\)/);
   assert.equal(

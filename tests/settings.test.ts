@@ -362,7 +362,7 @@ test("settings UI preserves controls behind four accessible transient routes", (
   }
 
   for (const settingName of [
-    "Lint notes on save",
+    "Lint on explicit save or page focus",
     "Add blank line before plain-note content",
     "Add blank body line after frontmatter",
     "Remove extra blank lines",
