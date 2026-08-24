@@ -26,7 +26,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.7.4",
+    version: "0.7.5",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
@@ -64,6 +64,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.7.2": "1.10.0",
     "0.7.3": "1.10.0",
     "0.7.4": "1.10.0",
+    "0.7.5": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -159,6 +160,22 @@ test("leading blank-line cleanup is wired through settings, runtime, and reporti
   assert.match(
     settingsTabSource,
     /setName\("Add blank body line after frontmatter"\)/,
+  );
+});
+
+test("every changed cleanup preserves an existing frontmatter envelope", () => {
+  assert.match(
+    cleanerSource,
+    /inspectFrontmatterEnvelopePreservation\(input, workingInput, true\)/,
+  );
+  assert.match(
+    cleanerSource,
+    /cleanup would alter or remove a frontmatter delimiter/,
+  );
+  assert.ok(
+    cleanerSource.indexOf("inspectFrontmatterEnvelopePreservation(input, workingInput, true)") <
+      cleanerSource.indexOf("changed: output !== input"),
+    "frontmatter envelope verification must run before a changed result is returned",
   );
 });
 

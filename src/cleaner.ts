@@ -106,6 +106,12 @@ interface LineToken {
   ending: "" | "\n" | "\r" | "\r\n";
 }
 
+interface FrontmatterEnvelope {
+  opener: string;
+  closer: string | null;
+  prefixThroughCloser: string | null;
+}
+
 interface ProcessedLineToken extends LineToken {
   protected: boolean;
   headingIndex?: number;
@@ -626,6 +632,8 @@ function cleanMarkdownOnce(
     changes.leadingBlankLineAdded = spacing.added;
   }
 
+  const frontmatterEnvelopeBaseline = workingInput;
+
   const tokens = splitLinesPreservingEndings(workingInput);
   const processedTokens: ProcessedLineToken[] = [];
   let inFrontmatter = false;
@@ -969,6 +977,20 @@ function cleanMarkdownOnce(
       `cleanup output would exceed a safety limit: ${outputSafetyBlock}`,
     );
   }
+  const frontmatterEnvelopeBlock =
+    inspectFrontmatterEnvelopePreservation(input, workingInput, true) ??
+    inspectFrontmatterEnvelopePreservation(
+      frontmatterEnvelopeBaseline,
+      output,
+    );
+  if (frontmatterEnvelopeBlock) {
+    return unchangedMarkdownResult(
+      input,
+      disabledRules,
+      null,
+      frontmatterEnvelopeBlock,
+    );
+  }
   return {
     output,
     changed: output !== input,
@@ -976,6 +998,61 @@ function cleanMarkdownOnce(
     disabledRules,
     noteDisabledReason: null,
     safetyBlockedReason: null,
+  };
+}
+
+export function inspectFrontmatterEnvelopePreservation(
+  input: string,
+  output: string,
+  allowFrontmatterBodyChanges = false,
+): string | null {
+  const before = readFrontmatterEnvelope(input);
+  if (!before?.closer) return null;
+
+  const after = readFrontmatterEnvelope(output);
+  if (
+    !after ||
+    after.opener !== before.opener ||
+    after.closer !== before.closer ||
+    (!allowFrontmatterBodyChanges &&
+      after.prefixThroughCloser !== before.prefixThroughCloser)
+  ) {
+    return "cleanup would alter or remove a frontmatter delimiter";
+  }
+  return null;
+}
+
+function readFrontmatterEnvelope(input: string): FrontmatterEnvelope | null {
+  // Most notes do not start with frontmatter. Check only the first physical
+  // line before allocating the full line-token array so the final envelope
+  // guard does not repeat document-scale work for ordinary Markdown.
+  const firstEndingIndex = input.search(/[\r\n]/);
+  const firstBody = (firstEndingIndex >= 0
+    ? input.slice(0, firstEndingIndex)
+    : input
+  ).replace(/^\uFEFF/, "");
+  if (!/^---[ \t]*$/.test(firstBody)) return null;
+
+  const tokens = splitLinesPreservingEndings(input);
+  const first = tokens[0];
+  if (!first) return null;
+
+  const opener = first.body.replace(/^\uFEFF/, "");
+
+  const closingIndex = tokens.findIndex(
+    (token, index) =>
+      index > 0 && /^(?:---|\.\.\.)[ \t]*$/.test(token.body),
+  );
+  const closer = tokens[closingIndex];
+  return {
+    opener,
+    closer: closer?.body ?? null,
+    prefixThroughCloser: closer
+      ? tokens
+          .slice(0, closingIndex + 1)
+          .map((token) => `${token.body}${token.ending}`)
+          .join("")
+      : null,
   };
 }
 

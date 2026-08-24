@@ -1,10 +1,10 @@
 # TPS Linter
 
-TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.7.4` limits automatic linting to an explicit conventional Save or a real focus entry into the active Markdown page. Background Vault modifications no longer schedule cleanup. Every released command, rule, fail-closed guard, settings-sync behavior, feedback behavior, and ownership-safe filename behavior remains available.
+TPS Linter is a lightweight, TPS-specific Obsidian linter for inspecting and safely cleaning one Markdown note at a time. Version `0.7.5` adds a final fail-closed frontmatter-envelope check: a cleanup can never be returned or written if it changes or removes an existing top-of-note opener or closer. Automatic linting remains limited to an explicit conventional Save or a real focus entry into the active Markdown page.
 
 ## Install with BRAT
 
-Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.7.4`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
+Add the public repository `ZachTish/tps-linter` to BRAT and track `Latest`, or freeze the exact numeric release `0.7.5`. The release attaches BRAT's required `main.js`, `manifest.json`, and complete `styles.css` artifacts.
 
 The released build is validated in the isolated Obsidian Plugin Test Vault. Publishing the release does not install it in the production vault; the production update remains a separate user-owned BRAT pull.
 
@@ -111,7 +111,7 @@ Only top-level mapping fields are reordered. When TPS Global Context Menu is loa
 
 The sorter moves complete YAML source blocks rather than rebuilding values. Comments, nested maps and lists, block scalars, quoted values, quoted Templater expressions, and original line endings are preserved. The result is parsed again and compared semantically before it can be written. Invalid YAML, exact or case-insensitive duplicate keys, non-mapping roots, complex keys, directives, document markers, anchors, aliases, merge keys, explicit tags, an unverifiable source layout, more than 1,000 top-level fields, or more than 2,000 physical frontmatter lines fail closed. Other enabled body rules may still clean the note, and the Check/Clean result reports that frontmatter sorting was skipped.
 
-Content mutation uses `Vault.process`, so the transformation runs against the current file revision instead of overwriting a concurrent edit with a stale read. Every changed result must preserve note-local controls and become byte-identical on an immediate second cleanup pass; otherwise the entire content change is rejected. Save linting performs a fresh preflight first and does not enter `Vault.process` for an already-clean or safety-blocked note.
+Content mutation uses `Vault.process`, so the transformation runs against the current file revision instead of overwriting a concurrent edit with a stale read. Before any changed result can be returned, a final independent envelope verifier requires any existing byte-zero/BOM top-of-note frontmatter opener and its exact `---` or `...` closer to remain present and unchanged. Every changed result must also preserve note-local controls and become byte-identical on an immediate second cleanup pass; otherwise the entire content change is rejected. Save linting performs a fresh preflight first and does not enter `Vault.process` for an already-clean or safety-blocked note.
 
 ## Scope and exclusions
 
@@ -192,6 +192,10 @@ npm run build
 ```
 
 Stable production-mode builds deploy byte-changed `main.js`, `manifest.json`, and `styles.css` only to the isolated test runtime `.obsidian/plugins/tps-linter`. They do not overwrite runtime-owned `data.json`. Direct production deployment is not part of this workflow.
+
+### 0.7.5 validation
+
+Validation covers a final pre-write frontmatter-envelope invariant; exact `---` and `...` closers; BOM, LF, CRLF, CR, and whitespace-suffixed delimiter representation; composition with every content rule; unchanged plain and already-unclosed notes; sorting and body-spacing regressions; complete unit/property and structural suites; the historical non-capitalization differential; TypeScript; a separate production build; isolated test-runtime deployment; reload; and live test-vault QA. Exact final counts, hashes, reload evidence, QA-note disposition, and production non-mutation are recorded in `release-notes/0.7.5.md`.
 
 ### 0.7.4 validation
 
