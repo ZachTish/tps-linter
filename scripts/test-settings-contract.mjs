@@ -26,7 +26,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.7.5",
+    version: "0.7.6",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
@@ -65,6 +65,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.7.3": "1.10.0",
     "0.7.4": "1.10.0",
     "0.7.5": "1.10.0",
+    "0.7.6": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -270,6 +271,20 @@ test("automatic linting requires explicit save or focused-page entry and keeps f
   );
   assert.match(saveSource, /if \(!preflight\.changed\)/);
   assert.match(saveSource, /await this\.app\.vault\.process\(file,/);
+  assert.ok(
+    (saveSource.match(
+      /await this\.getGcmAutomaticMutationPermission\(file\)/g,
+    ) ?? []).length >= 2,
+    "automatic linting must ask GCM on worker entry and again immediately before mutation",
+  );
+  assert.match(saveSource, /if \(!entryPermission\.allowed\)/);
+  assert.match(saveSource, /if \(!mutationPermission\.allowed\)/);
+  assert.ok(
+    saveSource.indexOf("await this.getGcmAutomaticMutationPermission(file)",
+      saveSource.indexOf("const mutationPermission")) <
+      saveSource.indexOf("await this.app.vault.process(file,"),
+    "the final GCM template check must settle before Vault.process",
+  );
   assert.match(saveSource, /mergeExcludedPaths\(/);
   assert.match(saveSource, /this\.settings\.lintOnSave/);
   assert.match(saveSource, /currentView\.editor\.getValue\(\)/);
@@ -320,6 +335,26 @@ test("automatic linting requires explicit save or focused-page entry and keeps f
   assert.match(saveLintSchedulerSource, /rerunRequested/);
   assert.match(saveLintSchedulerSource, /cancelPending\(\)/);
   assert.match(saveLintSchedulerSource, /dispose\(\)/);
+
+  const manualCleanSource = sourceBetween(
+    mainSource,
+    "  private async cleanFile(file: TFile): Promise<CleanResult> {",
+    "  private createFilenamePlan(",
+  );
+  assert.doesNotMatch(
+    manualCleanSource,
+    /getGcmAutomaticMutationPermission/,
+    "an explicit manual Clean must remain user-authorized even for a template",
+  );
+  assert.match(gcmCompatSource, /templates\.version !== 1/);
+  assert.match(
+    gcmCompatSource,
+    /typeof templates\.canAutomaticallyMutate !== "function"/,
+  );
+  assert.match(
+    gcmCompatSource,
+    /const result = await templates\.canAutomaticallyMutate\.call\(/,
+  );
 
   const unloadSource = sourceBetween(
     mainSource,

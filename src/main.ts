@@ -24,7 +24,9 @@ import {
   type MarkdownCleanupResult,
 } from "./cleaner";
 import {
+  inspectGcmAutomaticMutationPermission,
   inspectGcmIntegration,
+  type GcmAutomaticMutationPermission,
   type FilenameOwnershipStatus,
 } from "./gcm-compat";
 import {
@@ -465,6 +467,21 @@ export default class TPSLinterPlugin extends Plugin {
       return;
     }
 
+    const entryPermission =
+      await this.getGcmAutomaticMutationPermission(file);
+    if (!entryPermission.allowed) {
+      this.logGcmAutomaticMutationSkip(file, entryPermission);
+      return;
+    }
+    if (
+      !this.saveLintLifecycle.isCurrent(lifecycleGeneration) ||
+      !this.settings.lintOnSave ||
+      this.app.vault.getFileByPath(file.path) !== file ||
+      !this.getActiveEditingView(file)
+    ) {
+      return;
+    }
+
     const initialExcludedPaths = [...this.settings.excludedPaths];
     const initialExclusion = inspectPathExclusion(
       file.path,
@@ -548,6 +565,49 @@ export default class TPSLinterPlugin extends Plugin {
             );
           if (noticeMessage) new Notice(noticeMessage, 3000);
         }
+        return;
+      }
+
+      const mutationView = this.getActiveEditingView(file);
+      const mutationExclusion = inspectPathExclusion(
+        file.path,
+        mergeExcludedPaths(
+          initialExcludedPaths,
+          this.settings.excludedPaths,
+        ),
+      );
+      if (
+        !this.saveLintLifecycle.isCurrent(lifecycleGeneration) ||
+        !this.settings.lintOnSave ||
+        this.app.vault.getFileByPath(file.path) !== file ||
+        !mutationView ||
+        mutationExclusion.excluded
+      ) {
+        logDiagnostic(
+          "save",
+          file.path,
+          `skipped before mutation guard: ${mutationExclusion.reason ?? "save scope changed"}`,
+        );
+        return;
+      }
+
+      const mutationPermission =
+        await this.getGcmAutomaticMutationPermission(file);
+      if (!mutationPermission.allowed) {
+        this.logGcmAutomaticMutationSkip(file, mutationPermission);
+        return;
+      }
+      if (
+        !this.saveLintLifecycle.isCurrent(lifecycleGeneration) ||
+        !this.settings.lintOnSave ||
+        this.app.vault.getFileByPath(file.path) !== file ||
+        !this.getActiveEditingView(file)
+      ) {
+        logDiagnostic(
+          "save",
+          file.path,
+          "skipped after mutation guard: save scope changed",
+        );
         return;
       }
 
@@ -1276,7 +1336,39 @@ export default class TPSLinterPlugin extends Plugin {
 
   private getGcmIntegration() {
     return inspectGcmIntegration(
-      (this.app as App & { plugins?: unknown }).plugins,
+      this.getPluginManager(),
+    );
+  }
+
+  private getGcmAutomaticMutationPermission(
+    file: TFile,
+  ): Promise<GcmAutomaticMutationPermission> {
+    return inspectGcmAutomaticMutationPermission(
+      this.getPluginManager(),
+      file,
+    );
+  }
+
+  private getPluginManager(): unknown {
+    return (this.app as App & { plugins?: unknown }).plugins;
+  }
+
+  private logGcmAutomaticMutationSkip(
+    file: TFile,
+    permission: Extract<GcmAutomaticMutationPermission, { allowed: false }>,
+  ): void {
+    if (permission.reason === "failed") {
+      logWarning(
+        "save",
+        file.path,
+        "skipped: TPS Global Context Menu template guard failed closed",
+      );
+      return;
+    }
+    logDiagnostic(
+      "save",
+      file.path,
+      "skipped: TPS Global Context Menu protected this template from automatic mutation",
     );
   }
 
