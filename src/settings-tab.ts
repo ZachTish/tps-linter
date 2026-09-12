@@ -63,10 +63,6 @@ export class TPSLinterSettingTab extends PluginSettingTab {
     containerEl.addClass("tps-linter-settings");
 
     containerEl.createEl("h2", { text: "TPS Linter" });
-    containerEl.createEl("p", {
-      cls: "tps-linter-settings-intro",
-      text: "Check or clean one Markdown note. Automatic linting runs only from an in-editor Cmd-S/Ctrl-S or focused-page entry; TPS Linter never reacts to background file changes or scans the whole vault.",
-    });
 
     this.renderActions(containerEl);
     this.renderDestinationHub(containerEl);
@@ -136,9 +132,6 @@ export class TPSLinterSettingTab extends PluginSettingTab {
   private renderDestinationHub(parent: HTMLElement): void {
     const hub = parent.createDiv({ cls: "tps-linter-settings-route-hub" });
     hub.createEl("h3", { text: "Choose what to configure" });
-    hub.createEl("p", {
-      text: "Each area stays one click away. Your selected area is temporary and is not saved as a plugin setting.",
-    });
 
     const routes = hub.createDiv({ cls: "tps-linter-settings-route-strip" });
     routes.setAttribute("role", "group");
@@ -152,11 +145,10 @@ export class TPSLinterSettingTab extends PluginSettingTab {
           type: "button",
           "aria-pressed":
             destination.id === this.activeDestination ? "true" : "false",
-          "aria-label": `${destination.label}: ${destination.description}`,
+          "aria-label": destination.label,
         },
       });
       button.createEl("strong", { text: destination.label });
-      button.createSpan({ text: destination.description });
       button.addEventListener("click", () => {
         this.activeDestination = destination.id;
         this.display();
@@ -259,7 +251,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
 
     new Setting(parent)
       .setName("Add blank line before plain-note content")
-      .setDesc("In notes without frontmatter, insert one empty line before the first body content. This opt-in rule stays off until enabled locally or downloaded through same-remote-vault settings sync.")
+      .setDesc("In notes without frontmatter, insert one empty line before the first body content.")
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.ensureBlankLineAtBeginning)
@@ -271,7 +263,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
 
     new Setting(parent)
       .setName("Add blank body line after frontmatter")
-      .setDesc("Insert one empty, editable line immediately below the closing --- (or ...) in valid top-of-note frontmatter, including metadata-only notes. This opt-in rule stays off until enabled locally or downloaded through same-remote-vault settings sync.")
+      .setDesc("Insert one empty, editable line immediately below the closing --- (or ...) in valid top-of-note frontmatter, including metadata-only notes.")
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.ensureBlankLineAfterFrontmatter)
@@ -295,7 +287,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
 
     new Setting(parent)
       .setName("Remove blank lines between list items")
-      .setDesc("Remove blank-only separators between same-indentation Markdown list items and checklists. Eligible items may contain complete same-line HTML comments; item text stays byte-identical. This opt-in rule stays off until enabled locally or downloaded through same-remote-vault settings sync. Nested transitions, mixed list types, continuation paragraphs, and multiline or other protected regions stay unchanged.")
+      .setDesc("Remove blank-only separators between same-indentation Markdown list items and checklists. Eligible items may contain complete same-line HTML comments; item text stays byte-identical. Nested transitions, mixed list types, continuation paragraphs, and multiline or other protected regions stay unchanged.")
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.removeBlankLinesBetweenListItems)
