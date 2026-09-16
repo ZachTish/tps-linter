@@ -107,7 +107,7 @@ export function formatExplicitSaveNoChangeNotice(
     const verb = relevantDisabledRules.length === 1 ? "is" : "are";
     return `TPS Linter: no changes; ${labels} ${verb} off on this device.`;
   }
-  return "TPS Linter: no changes under the rules enabled on this device.";
+  return "TPS Linter: no changes under the configured rules.";
 }
 
 function plural(word: string, count: number): string {

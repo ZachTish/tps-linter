@@ -26,7 +26,7 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.7.7",
+    version: "0.8.0",
     minAppVersion: "1.10.0",
     description: "TPS-specific note and filename cleanup with safe active-note linting.",
     author: "Zach Tisherman",
@@ -67,6 +67,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.7.5": "1.10.0",
     "0.7.6": "1.10.0",
     "0.7.7": "1.10.0",
+    "0.8.0": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -891,7 +892,7 @@ test("note-local controls, range markers, and idempotence gates remain stable", 
 test("TPS Linter settings destinations stay accessible, responsive, and namespaced", () => {
   assert.match(settingsTabSource, /Explicit save, page focus, and body spacing/);
   assert.doesNotMatch(settingsTabSource, /tps-linter-settings-intro/);
-  assert.match(settingsTabSource, /setName\("Lint on explicit save or page focus"\)/);
+  assert.match(settingsTabSource, /setName\("Lint on explicit save"\)/);
   assert.match(settingsTabSource, /Background file modifications do not trigger linting\./);
   assert.match(settingsTabSource, /setName\("Add blank line before plain-note content"\)/);
   assert.match(settingsTabSource, /setName\("Add blank body line after frontmatter"\)/);

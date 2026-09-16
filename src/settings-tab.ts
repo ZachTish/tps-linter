@@ -238,8 +238,8 @@ export class TPSLinterSettingTab extends PluginSettingTab {
     parent.createEl("h3", { text: "Clean notes" });
 
     new Setting(parent)
-      .setName("Lint on explicit save or page focus")
-      .setDesc("Automatically apply the rules enabled on this device only when you press the standard Cmd-S/Ctrl-S shortcut inside the active Markdown editor or focus that page from outside it. Background file modifications do not trigger linting. A small notice lists applied changes; filename cleanup remains manual.")
+      .setName("Lint on explicit save")
+      .setDesc("Clean on Cmd-S/Ctrl-S in the active Markdown editor. Background file modifications do not trigger linting. Filename cleanup remains manual.")
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.lintOnSave)
@@ -248,6 +248,11 @@ export class TPSLinterSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
+
+    new Setting(parent).setName("Also lint on page focus").setDesc("Off by default. Requires lint on explicit save to be enabled.")
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.lintOnFocus).onChange(async value => { this.plugin.settings.lintOnFocus = value; await this.plugin.saveSettings(); }));
+    new Setting(parent).setName("Move tags to frontmatter").setDesc("Move standalone tag-only lines into tags. Leaves tags in prose, tasks, code, and protected content untouched.")
+      .addToggle(toggle => toggle.setValue(this.plugin.settings.moveTagsToFrontmatter).onChange(async value => { this.plugin.settings.moveTagsToFrontmatter = value; await this.plugin.saveSettings(); }));
 
     new Setting(parent)
       .setName("Add blank line before plain-note content")

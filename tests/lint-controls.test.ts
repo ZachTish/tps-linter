@@ -35,6 +35,7 @@ test("exports stable namespaced control keys and rule IDs", () => {
     "heading-levels",
     "frontmatter-blank-line",
     "frontmatter-sort",
+    "move-tags-to-frontmatter",
     "all",
   ]);
 });

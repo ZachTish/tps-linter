@@ -21,7 +21,9 @@ const EXPECTED_SETTING_KEYS = [
   "filenameUnsafeCharacterStyle",
   "headingCapitalizationStyle",
   "headingStartLevel",
+  "lintOnFocus",
   "lintOnSave",
+  "moveTagsToFrontmatter",
   "normalizeHeadingLevels",
   "pushHeadingHierarchyToH6",
   "removeBlankLinesBetweenListItems",
@@ -36,6 +38,8 @@ test("settings defaults are conservative and TPS-specific", () => {
   assert.deepEqual(DEFAULT_SETTINGS, {
     schemaVersion: 7,
     lintOnSave: true,
+    lintOnFocus: false,
+    moveTagsToFrontmatter: false,
     cleanFilenames: true,
     filenameUnsafeCharacterStyle: "space",
     removeObsidianLinkCharacters: false,
@@ -116,6 +120,8 @@ test("normalization accepts valid values and stamps schema v7", () => {
     normalizeSettings({
       schemaVersion: 999,
       lintOnSave: false,
+      lintOnFocus: false,
+      moveTagsToFrontmatter: false,
       cleanFilenames: false,
       filenameUnsafeCharacterStyle: "dash",
       removeObsidianLinkCharacters: true,
@@ -138,6 +144,8 @@ test("normalization accepts valid values and stamps schema v7", () => {
     {
       schemaVersion: SETTINGS_SCHEMA_VERSION,
       lintOnSave: false,
+      lintOnFocus: false,
+      moveTagsToFrontmatter: false,
       cleanFilenames: false,
       filenameUnsafeCharacterStyle: "dash",
       removeObsidianLinkCharacters: true,
@@ -362,7 +370,7 @@ test("settings UI preserves controls behind four accessible transient routes", (
   }
 
   for (const settingName of [
-    "Lint on explicit save or page focus",
+    "Lint on explicit save",
     "Add blank line before plain-note content",
     "Add blank body line after frontmatter",
     "Remove extra blank lines",

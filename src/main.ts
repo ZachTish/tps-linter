@@ -412,6 +412,7 @@ export default class TPSLinterPlugin extends Plugin {
     file: TAbstractFile,
     requestExplicitFeedback = false,
   ): void {
+    if (!requestExplicitFeedback && !this.settings.lintOnFocus) return;
     if (
       !this.saveLintLifecycle.isActive() ||
       !this.settings.lintOnSave ||
@@ -1121,6 +1122,7 @@ export default class TPSLinterPlugin extends Plugin {
       normalizeHeadingLevels: this.settings.normalizeHeadingLevels,
       pushHeadingHierarchyToH6: this.settings.pushHeadingHierarchyToH6,
       headingStartLevel: this.settings.headingStartLevel,
+      moveTagsToFrontmatter: this.settings.moveTagsToFrontmatter,
       sortFrontmatterFields: this.settings.sortFrontmatterFields,
       ensureBlankLineAfterFrontmatter:
         this.settings.ensureBlankLineAfterFrontmatter,
@@ -1269,6 +1271,7 @@ export default class TPSLinterPlugin extends Plugin {
     const capitalizedHeadings = result.changes.headingsCapitalized;
     const adjustedHeadingLevels = result.changes.headingLevelsAdjusted;
     const reorderedFields = result.changes.frontmatterFieldsReordered;
+    if (result.changes.tagsMoved) actions.push(`${applied ? "moved" : "move"} ${result.changes.tagsMoved} tags to frontmatter`);
     if (whitespaceLines > 0) {
       actions.push(
         `${applied ? "cleared" : "clear"} ${whitespaceLines} whitespace-only ${plural("line", whitespaceLines)}`,

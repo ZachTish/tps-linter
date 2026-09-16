@@ -10,6 +10,8 @@ export type HeadingStartLevel = 1 | 2;
 export interface TPSLinterSettings {
   schemaVersion: typeof SETTINGS_SCHEMA_VERSION;
   lintOnSave: boolean;
+  lintOnFocus: boolean;
+  moveTagsToFrontmatter: boolean;
   cleanFilenames: boolean;
   filenameUnsafeCharacterStyle: FilenameUnsafeCharacterStyle;
   removeObsidianLinkCharacters: boolean;
@@ -57,6 +59,8 @@ export const DEFAULT_TPS_FRONTMATTER_PRIORITY_KEYS = Object.freeze([
 export const DEFAULT_SETTINGS: ReadonlyTPSLinterSettings = Object.freeze({
   schemaVersion: SETTINGS_SCHEMA_VERSION,
   lintOnSave: true,
+  lintOnFocus: false,
+  moveTagsToFrontmatter: false,
   cleanFilenames: true,
   filenameUnsafeCharacterStyle: "space",
   removeObsidianLinkCharacters: false,
@@ -105,6 +109,8 @@ export function normalizeSettings(loadedData: unknown): TPSLinterSettings {
       data.lintOnSave,
       DEFAULT_SETTINGS.lintOnSave,
     ),
+    lintOnFocus: readBoolean(data.lintOnFocus, false),
+    moveTagsToFrontmatter: readBoolean(data.moveTagsToFrontmatter, false),
     cleanFilenames: readBoolean(
       data.cleanFilenames,
       DEFAULT_SETTINGS.cleanFilenames,

@@ -1,3 +1,4 @@
+import { moveTagsToFrontmatter } from "./move-tags.ts";
 import {
   inspectTopLevelFrontmatterSafety,
   sortTopLevelFrontmatterFields,
@@ -62,6 +63,7 @@ export interface MarkdownCleanupOptions {
   normalizeHeadingLevels: boolean;
   pushHeadingHierarchyToH6: boolean;
   headingStartLevel: 1 | 2;
+  moveTagsToFrontmatter?: boolean;
   sortFrontmatterFields: boolean;
   ensureBlankLineAfterFrontmatter: boolean;
   frontmatterPriorityKeys: readonly string[];
@@ -75,6 +77,7 @@ export interface MarkdownCleanupChanges {
   trailingBlankLinesRemoved: number;
   headingsCapitalized: number;
   headingLevelsAdjusted: number;
+  tagsMoved?: number;
   frontmatterFieldsReordered: number;
   leadingBlankLineAdded: boolean;
   frontmatterBlankLineAdded: boolean;
@@ -604,6 +607,11 @@ function cleanMarkdownOnce(
   };
 
   let workingInput = input;
+  if (options.moveTagsToFrontmatter) {
+    const moved = moveTagsToFrontmatter(input);
+    workingInput = moved.output;
+    if (moved.moved) changes.tagsMoved = moved.moved;
+  }
   let preserveTerminalFrontmatterBodySlot = false;
   if (options.sortFrontmatterFields) {
     const frontmatter = sortDocumentFrontmatter(
@@ -1087,6 +1095,7 @@ function applyDisabledRules(
       : options.headingCapitalizationStyle,
     normalizeHeadingLevels:
       options.normalizeHeadingLevels && !disabledRules.has("heading-levels"),
+    moveTagsToFrontmatter: options.moveTagsToFrontmatter && !disabledRules.has("move-tags-to-frontmatter"),
     sortFrontmatterFields:
       options.sortFrontmatterFields &&
       !disabledRules.has("frontmatter-sort"),

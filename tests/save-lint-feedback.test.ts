@@ -61,7 +61,7 @@ test("save feedback stays silent for the convergent self-triggered rerun", () =>
   assert.equal(formatSaveLintNotice(second), null);
   assert.equal(
     formatExplicitSaveNoChangeNotice(second),
-    "TPS Linter: no changes under the rules enabled on this device.",
+    "TPS Linter: no changes under the configured rules.",
   );
 });
 
@@ -84,7 +84,7 @@ test("explicit-save no-change feedback distinguishes disabled and blocked notes"
   const clean = cleanMarkdown("Body\n", OPTIONS);
   assert.equal(
     formatExplicitSaveNoChangeNotice(clean),
-    "TPS Linter: no changes under the rules enabled on this device.",
+    "TPS Linter: no changes under the configured rules.",
   );
   assert.equal(
     formatExplicitSaveNoChangeNotice({

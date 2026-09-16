@@ -37,6 +37,7 @@ export const TPS_LINTER_RULE_IDS = Object.freeze([
   "heading-levels",
   "frontmatter-blank-line",
   "frontmatter-sort",
+  "move-tags-to-frontmatter",
   "all",
 ] as const);
 
