@@ -14,7 +14,6 @@ const cleanerSource = readFileSync(new URL("../src/cleaner.ts", import.meta.url)
 const gcmCompatSource = readFileSync(new URL("../src/gcm-compat.ts", import.meta.url), "utf8");
 const lintControlsSource = readFileSync(new URL("../src/lint-controls.ts", import.meta.url), "utf8");
 const optInSuggestionsSource = readFileSync(new URL("../src/opt-in-suggestions.ts", import.meta.url), "utf8");
-const saveLintSchedulerSource = readFileSync(new URL("../src/save-lint-scheduler.ts", import.meta.url), "utf8");
 const settingsPersistenceSource = readFileSync(new URL("../src/settings-persistence.ts", import.meta.url), "utf8");
 const settingsTabSource = readFileSync(new URL("../src/settings-tab.ts", import.meta.url), "utf8");
 const vaultFileIdentitySource = readFileSync(new URL("../src/vault-file-identity.ts", import.meta.url), "utf8");
@@ -26,9 +25,9 @@ test("TPS Linter release metadata is aligned", () => {
   assert.deepEqual(manifest, {
     id: "tps-linter",
     name: "TPS Linter",
-    version: "0.8.0",
+    version: "1.0.0",
     minAppVersion: "1.10.0",
-    description: "TPS-specific note and filename cleanup with safe active-note linting.",
+    description: "Explicit, conservative Markdown and filename cleanup for Obsidian.",
     author: "Zach Tisherman",
     authorUrl: "https://github.com/ZachTish",
     isDesktopOnly: false,
@@ -68,6 +67,7 @@ test("TPS Linter release metadata is aligned", () => {
     "0.7.6": "1.10.0",
     "0.7.7": "1.10.0",
     "0.8.0": "1.10.0",
+    "1.0.0": "1.10.0",
   });
   assert.match(esbuildSource, /Copyright Eemeli Aro/);
   assert.match(esbuildSource, /Permission to use, copy, modify/);
@@ -99,7 +99,6 @@ test("settings sync hot-reloads external data and local writes stay merge-safe",
   assert.doesNotMatch(saveSettingsSource, /this\.saveData\(/);
   assert.match(externalHookSource, /this\.pendingExternalSettingsChange = true/);
   assert.match(externalHookSource, /this\.settingsReady/);
-  assert.match(externalHookSource, /this\.saveLintLifecycle\.isActive\(\)/);
   assert.match(externalHookSource, /this\.startExternalSettingsReload\(\)/);
   assert.doesNotMatch(externalHookSource, /this\.saveData\(/);
   assert.ok(
@@ -211,194 +210,13 @@ test("list-item blank-line cleanup is opt-in and wired end to end", () => {
   );
 });
 
-test("automatic linting requires explicit save or focused-page entry and keeps filename ownership with GCM", () => {
-  assert.match(
-    settingsTabSource,
-    /TPS Global Context Menu currently owns automatic title and filename synchronization\./,
-  );
-  assert.match(settingsTabSource, /setButtonText\(["']Open GCM settings["']\)/);
-  assert.match(settingsTabSource, /openPluginSettings\(["']tps-global-context-menu["']\)/);
-
-  assert.equal(
-    (mainSource.match(/\.vault\.on\(\s*["']modify["']/g) ?? []).length,
-    0,
-    "background Vault modifications must not trigger TPS Linter",
-  );
-  assert.doesNotMatch(
-    allSource,
-    /\.vault\.on\(\s*["'](?:create|rename|delete)["']/,
-    "save linting must not add create, rename, or delete hooks",
-  );
-  assert.doesNotMatch(
-    allSource,
-    /\.workspace\.on\(\s*["'](?:file-open|editor-change|active-leaf-change)["']/,
-    "TPS Linter must not register automatic workspace cleanup hooks",
-  );
-  assert.doesNotMatch(allSource, /\bsetInterval\s*\(/);
-
-  const queueSource = sourceBetween(
-    mainSource,
-    "  private queueSaveLint(",
-    "  private async lintFileOnSave(file: TFile): Promise<void> {",
-  );
-  assert.match(queueSource, /this\.settings\.lintOnSave/);
-  assert.match(queueSource, /this\.saveLintLifecycle\.isActive\(\)/);
-  assert.match(queueSource, /file\.extension !== "md"/);
-  assert.match(queueSource, /this\.getActiveEditingView\(file\)/);
-  assert.match(queueSource, /inspectPathExclusion\(/);
-  assert.match(queueSource, /if \(requestExplicitFeedback\)/);
-  assert.match(queueSource, /this\.saveLintFeedback\.requestExplicit\(file\)/);
-  assert.match(queueSource, /this\.saveLintScheduler\?\.request\(file\)/);
-  assert.ok(
-    queueSource.indexOf("inspectPathExclusion(") <
-      queueSource.indexOf("saveLintFeedback.requestExplicit(file)"),
-    "explicit feedback state must be recorded only after scope and exclusion guards pass",
-  );
-
-  const saveSource = sourceBetween(
-    mainSource,
-    "  private async lintFileOnSave(file: TFile): Promise<void> {",
-    "  getGcmFilenameOwnership(): FilenameOwnershipStatus {",
-  );
-  assert.match(saveSource, /const freshContent = await this\.app\.vault\.read\(file\)/);
-  assert.match(
-    saveSource,
-    /const lifecycleGeneration = this\.saveLintLifecycle\.capture\(\)/,
-  );
-  assert.ok(
-    (saveSource.match(
-      /this\.saveLintLifecycle\.isCurrent\(lifecycleGeneration\)/g,
-    ) ?? []).length >= 3,
-    "save lint must guard entry, post-read preflight, and the process callback",
-  );
-  assert.match(saveSource, /if \(!preflight\.changed\)/);
-  assert.match(saveSource, /await this\.app\.vault\.process\(file,/);
-  assert.ok(
-    (saveSource.match(
-      /await this\.getGcmAutomaticMutationPermission\(file\)/g,
-    ) ?? []).length >= 2,
-    "automatic linting must ask GCM on worker entry and again immediately before mutation",
-  );
-  assert.match(saveSource, /if \(!entryPermission\.allowed\)/);
-  assert.match(saveSource, /if \(!mutationPermission\.allowed\)/);
-  assert.ok(
-    saveSource.indexOf("await this.getGcmAutomaticMutationPermission(file)",
-      saveSource.indexOf("const mutationPermission")) <
-      saveSource.indexOf("await this.app.vault.process(file,"),
-    "the final GCM template check must settle before Vault.process",
-  );
-  assert.match(saveSource, /mergeExcludedPaths\(/);
-  assert.match(saveSource, /this\.settings\.lintOnSave/);
-  assert.match(saveSource, /currentView\.editor\.getValue\(\)/);
-  assert.match(saveSource, /processView\.editor\.getValue\(\)/);
-  assert.match(saveSource, /editorContentMatchesFile\(/);
-  assert.match(saveSource, /the editor has newer unsaved content/);
-  assert.match(
-    saveSource,
-    /const processOptions = this\.markdownOptions\(\)/,
-    "the atomic callback must resolve current rule settings",
-  );
-  assert.match(
-    saveSource,
-    /currentContent === freshContent[\s\S]*JSON\.stringify\(processOptions\) === preflightOptionsFingerprint[\s\S]*\? preflight[\s\S]*: cleanMarkdown\(currentContent, processOptions\)/,
-    "an unchanged revision may reuse the verified preflight only when current rule settings match",
-  );
-  assert.doesNotMatch(
-    saveSource,
-    /cleanMarkdown\(currentContent,\s*preflightOptions\)/,
-    "a changed revision must not use the preflight options snapshot",
-  );
-  assert.doesNotMatch(saveSource, /createFilenamePlan|createFilenameDecision/);
-  assert.doesNotMatch(saveSource, /renameFile/);
-  assert.match(
-    saveSource,
-    /const feedbackRun = this\.saveLintFeedback\.beginRun\(file\)/,
-  );
-  assert.match(saveSource, /this\.saveLintFeedback\.requeueRun\(file, feedbackRun\)/);
-  assert.match(
-    saveSource,
-    /const reportExplicitNoChange\s*=\s*this\.saveLintFeedback\.completeRun\(file, feedbackRun\)[\s\S]*const relevantDisabledRules = reportExplicitNoChange\s*\? findRelevantDisabledOptInRules\([\s\S]*formatExplicitSaveNoChangeNotice\(\s*preflight,\s*relevantDisabledRules,?\s*\)/,
-  );
-  assert.match(saveSource, /\? formatSaveLintNotice\(result\)/);
-  assert.match(
-    saveSource,
-    /: reportExplicitNoChange\s*\? formatExplicitSaveNoChangeNotice\(\s*result,\s*findRelevantDisabledOptInRules\(/,
-  );
-  assert.match(
-    saveSource,
-    /new Notice\(noticeMessage, result\.changed \? 4000 : 3000\)/,
-  );
-  assert.ok(
-    saveSource.indexOf("await this.app.vault.process(file,") <
-      saveSource.indexOf("formatSaveLintNotice(result)"),
-    "changed-result feedback must be emitted only after the atomic process finishes",
-  );
-
-  assert.match(saveLintSchedulerSource, /rerunRequested/);
-  assert.match(saveLintSchedulerSource, /cancelPending\(\)/);
-  assert.match(saveLintSchedulerSource, /dispose\(\)/);
-
-  const manualCleanSource = sourceBetween(
-    mainSource,
-    "  private async cleanFile(file: TFile): Promise<CleanResult> {",
-    "  private createFilenamePlan(",
-  );
-  assert.doesNotMatch(
-    manualCleanSource,
-    /getGcmAutomaticMutationPermission/,
-    "an explicit manual Clean must remain user-authorized even for a template",
-  );
-  assert.match(gcmCompatSource, /templates\.version !== 1/);
-  assert.match(
-    gcmCompatSource,
-    /typeof templates\.canAutomaticallyMutate !== "function"/,
-  );
-  assert.match(
-    gcmCompatSource,
-    /const result = await templates\.canAutomaticallyMutate\.call\(/,
-  );
-
-  const unloadSource = sourceBetween(
-    mainSource,
-    "  onunload(): void {",
-    "  async loadSettings(): Promise<void> {",
-  );
-  assert.ok(
-    unloadSource.indexOf("this.saveLintLifecycle.invalidate()") <
-      unloadSource.indexOf("this.saveLintScheduler?.dispose()"),
-    "unload must invalidate in-flight work before disposing queued work",
-  );
-  assert.match(unloadSource, /this\.saveLintFeedback\.clear\(\)/);
-  assert.match(unloadSource, /this\.stopObservingAutoLintTriggers\(doc\)/);
-
-  const onloadSource = sourceBetween(
-    mainSource,
-    "  async onload(): Promise<void> {",
-    "  onunload(): void {",
-  );
-  assert.match(
-    onloadSource,
-    /await this\.loadSettings\(\);\s*if \(!this\.saveLintLifecycle\.isCurrent\(lifecycleGeneration\)\)/,
-    "onload must not initialize after an unload during settings I/O",
-  );
-  assert.match(onloadSource, /this\.observeCurrentAutoLintDocuments\(\)/);
-  assert.match(onloadSource, /this\.app\.workspace\.iterateAllLeaves/);
-  assert.match(onloadSource, /if \(container\?\.doc\) documents\.add\(container\.doc\)/);
-  assert.match(onloadSource, /this\.app\.workspace\.on\("window-open"/);
-  assert.match(onloadSource, /this\.app\.workspace\.on\("window-close"/);
-  assert.match(onloadSource, /const eventWindow = doc\.defaultView/);
-  assert.match(onloadSource, /observer\.registerDomEvent\(\s*eventWindow,\s*"keydown"/);
-  assert.match(onloadSource, /observer\.registerDomEvent\(\s*eventWindow,\s*"focusin"/);
-  assert.match(onloadSource, /observer\.registerDomEvent\(\s*eventWindow,\s*"focus"/);
-  assert.match(onloadSource, /isManualSaveShortcut\(event, Platform\.isMacOS\)/);
-  assert.match(onloadSource, /this\.getFocusedMarkdownView\(doc, event\.targetNode\)/);
-  assert.match(onloadSource, /event\.relatedTarget/);
-  assert.match(onloadSource, /isPageFocusEntry\(true, previousTargetInsideView\)/);
-  assert.match(onloadSource, /this\.getFocusedMarkdownView\(doc, doc\.activeElement\)/);
-  assert.match(onloadSource, /this\.queueSaveLint\(view\.file, true\)/);
-  assert.match(onloadSource, /this\.queueSaveLint\(view\.file\)/);
-  assert.match(onloadSource, /\{ capture: true, passive: true \}/);
-  assert.doesNotMatch(onloadSource, /preventDefault|stopPropagation/);
+test("only explicit cleanup entry points remain", () => {
+  assert.doesNotMatch(allSource, /saveLint|lintOnSave|lintOnFocus|lintFileOnSave|canAutomaticallyMutate/);
+  assert.doesNotMatch(allSource, /registerDomEvent|setInterval|setTimeout|onLayoutReady/);
+  assert.doesNotMatch(allSource, /\.vault\.on\(/);
+  assert.doesNotMatch(allSource, /\.workspace\.on\(\s*["'](?:file-open|editor-change|active-leaf-change|window-open|window-close)["']/);
+  assert.match(mainSource, /await this\.loadSettings\(\);\s*if \(!active\) return/);
+  assert.match(mainSource, /this\.register\(\(\) => \{ active = false; \}\)/);
 });
 
 test("TPS Linter follows GCM frontmatter priority without invoking its mutator", () => {
@@ -478,11 +296,6 @@ test("manual check and clean use fresh preflights and clean stays atomic", () =>
     "manual Clean must not run suggestion probes on its preliminary inspection",
   );
   assert.match(mainSource, /Optional fixes off on this device:/);
-  assert.match(
-    mainSource,
-    /let resultOptions = preflightOptions;[\s\S]*resultOptions = processOptions;[\s\S]*findRelevantDisabledOptInRules\(\s*result\.output,\s*resultOptions,\s*result,/,
-    "post-process save suggestions must use the exact option snapshot that produced the result",
-  );
   assert.equal(
     (optInSuggestionsSource.match(/cleanMarkdown\(/g) ?? []).length,
     2,
@@ -657,7 +470,7 @@ test("manual inspection and clean never hand work to a same-path replacement", (
   );
 });
 
-test("same-file cleans serialize with save reruns preserved", () => {
+test("same-file explicit cleans serialize", () => {
   const cleanWithNoticeSource = sourceBetween(
     mainSource,
     "  private async cleanFileWithNotice(",
@@ -672,14 +485,7 @@ test("same-file cleans serialize with save reruns preserved", () => {
     cleanWithNoticeSource,
     /finally\s*\{\s*this\.activeCleans\.delete\(file\);\s*\}/,
   );
-  const saveSource = sourceBetween(
-    mainSource,
-    "  private async lintFileOnSave(file: TFile): Promise<void> {",
-    "  getGcmFilenameOwnership(): FilenameOwnershipStatus {",
-  );
-  assert.match(saveSource, /if \(this\.activeCleans\.has\(file\)\)/);
-  assert.match(saveSource, /this\.saveLintScheduler\?\.request\(file\)/);
-  assert.match(saveSource, /finally\s*\{\s*this\.activeCleans\.delete\(file\);\s*\}/);
+
 });
 
 test("filename collision checks stay sibling-local and never scan the vault", () => {
@@ -890,10 +696,8 @@ test("note-local controls, range markers, and idempotence gates remain stable", 
 });
 
 test("TPS Linter settings destinations stay accessible, responsive, and namespaced", () => {
-  assert.match(settingsTabSource, /Explicit save, page focus, and body spacing/);
+  assert.match(settingsTabSource, /Manual cleanup and body spacing/);
   assert.doesNotMatch(settingsTabSource, /tps-linter-settings-intro/);
-  assert.match(settingsTabSource, /setName\("Lint on explicit save"\)/);
-  assert.match(settingsTabSource, /Background file modifications do not trigger linting\./);
   assert.match(settingsTabSource, /setName\("Add blank line before plain-note content"\)/);
   assert.match(settingsTabSource, /setName\("Add blank body line after frontmatter"\)/);
   assert.equal(

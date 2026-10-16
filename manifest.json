@@ -1,9 +1,9 @@
 {
   "id": "tps-linter",
   "name": "TPS Linter",
-  "version": "0.8.0",
+  "version": "1.0.0",
   "minAppVersion": "1.10.0",
-  "description": "TPS-specific note and filename cleanup with safe active-note linting.",
+  "description": "Explicit, conservative Markdown and filename cleanup for Obsidian.",
   "author": "Zach Tisherman",
   "authorUrl": "https://github.com/ZachTish",
   "isDesktopOnly": false

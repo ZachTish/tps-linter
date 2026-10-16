@@ -21,8 +21,6 @@ const EXPECTED_SETTING_KEYS = [
   "filenameUnsafeCharacterStyle",
   "headingCapitalizationStyle",
   "headingStartLevel",
-  "lintOnFocus",
-  "lintOnSave",
   "moveTagsToFrontmatter",
   "normalizeHeadingLevels",
   "pushHeadingHierarchyToH6",
@@ -37,8 +35,6 @@ const EXPECTED_SETTING_KEYS = [
 test("settings defaults are conservative and TPS-specific", () => {
   assert.deepEqual(DEFAULT_SETTINGS, {
     schemaVersion: 7,
-    lintOnSave: true,
-    lintOnFocus: false,
     moveTagsToFrontmatter: false,
     cleanFilenames: true,
     filenameUnsafeCharacterStyle: "space",
@@ -93,11 +89,9 @@ test("GCM property priority is trimmed, case-deduplicated, and fail-safe", () =>
 });
 
 test("schema v7 keeps spacing mutations opt-in", () => {
-  assert.equal(DEFAULT_SETTINGS.lintOnSave, true);
   assert.equal(DEFAULT_SETTINGS.ensureBlankLineAtBeginning, false);
   assert.equal(DEFAULT_SETTINGS.ensureBlankLineAfterFrontmatter, false);
   assert.equal(DEFAULT_SETTINGS.removeBlankLinesBetweenListItems, false);
-  assert.equal(normalizeSettings({ lintOnSave: false }).lintOnSave, false);
   assert.equal(
     normalizeSettings({ ensureBlankLineAtBeginning: true })
       .ensureBlankLineAtBeginning,
@@ -119,8 +113,6 @@ test("normalization accepts valid values and stamps schema v7", () => {
   assert.deepEqual(
     normalizeSettings({
       schemaVersion: 999,
-      lintOnSave: false,
-      lintOnFocus: false,
       moveTagsToFrontmatter: false,
       cleanFilenames: false,
       filenameUnsafeCharacterStyle: "dash",
@@ -143,8 +135,6 @@ test("normalization accepts valid values and stamps schema v7", () => {
     }),
     {
       schemaVersion: SETTINGS_SCHEMA_VERSION,
-      lintOnSave: false,
-      lintOnFocus: false,
       moveTagsToFrontmatter: false,
       cleanFilenames: false,
       filenameUnsafeCharacterStyle: "dash",
@@ -171,7 +161,6 @@ test("normalization accepts valid values and stamps schema v7", () => {
 test("invalid enum and primitive values safely fall back", () => {
   assert.deepEqual(
     normalizeSettings({
-      lintOnSave: "yes",
       cleanFilenames: "yes",
       filenameUnsafeCharacterStyle: "underscore",
       removeObsidianLinkCharacters: "true",
@@ -226,7 +215,6 @@ test("v2 migration adds the new heading option without restoring removed exclusi
   });
 
   assert.equal(normalized.schemaVersion, 7);
-  assert.equal(normalized.lintOnSave, true);
   assert.equal(normalized.ensureBlankLineAtBeginning, false);
   assert.equal(normalized.ensureBlankLineAfterFrontmatter, false);
   assert.equal(normalized.removeBlankLinesBetweenListItems, false);
@@ -244,7 +232,6 @@ test("v3 migration preserves behavior and adds later controls", () => {
   });
 
   assert.equal(normalized.schemaVersion, 7);
-  assert.equal(normalized.lintOnSave, true);
   assert.equal(normalized.ensureBlankLineAtBeginning, false);
   assert.equal(normalized.ensureBlankLineAfterFrontmatter, false);
   assert.equal(normalized.removeBlankLinesBetweenListItems, false);
@@ -262,7 +249,6 @@ test("v4 migration enables requested save linting and keeps new spacing off", ()
   });
 
   assert.equal(normalized.schemaVersion, 7);
-  assert.equal(normalized.lintOnSave, true);
   assert.equal(normalized.ensureBlankLineAtBeginning, false);
   assert.equal(normalized.ensureBlankLineAfterFrontmatter, false);
   assert.equal(normalized.removeBlankLinesBetweenListItems, false);
@@ -273,14 +259,12 @@ test("v4 migration enables requested save linting and keeps new spacing off", ()
 test("v5 migration preserves existing choices and adds leading spacing off", () => {
   const normalized = normalizeSettings({
     schemaVersion: 5,
-    lintOnSave: false,
     collapseConsecutiveBlankLines: false,
     ensureBlankLineAfterFrontmatter: true,
     excludedPaths: ["Custom/Safe"],
   });
 
   assert.equal(normalized.schemaVersion, 7);
-  assert.equal(normalized.lintOnSave, false);
   assert.equal(normalized.collapseConsecutiveBlankLines, false);
   assert.equal(normalized.ensureBlankLineAtBeginning, false);
   assert.equal(normalized.ensureBlankLineAfterFrontmatter, true);
@@ -291,14 +275,12 @@ test("v5 migration preserves existing choices and adds leading spacing off", () 
 test("v6 migration adds list-item compaction off and preserves existing choices", () => {
   const normalized = normalizeSettings({
     schemaVersion: 6,
-    lintOnSave: false,
     collapseConsecutiveBlankLines: true,
     ensureBlankLineAfterFrontmatter: true,
     excludedPaths: ["Custom/Safe"],
   });
 
   assert.equal(normalized.schemaVersion, 7);
-  assert.equal(normalized.lintOnSave, false);
   assert.equal(normalized.collapseConsecutiveBlankLines, true);
   assert.equal(normalized.ensureBlankLineAfterFrontmatter, true);
   assert.equal(normalized.removeBlankLinesBetweenListItems, false);
@@ -370,7 +352,6 @@ test("settings UI preserves controls behind four accessible transient routes", (
   }
 
   for (const settingName of [
-    "Lint on explicit save",
     "Add blank line before plain-note content",
     "Add blank body line after frontmatter",
     "Remove extra blank lines",
@@ -427,5 +408,13 @@ test("settings UI preserves controls behind four accessible transient routes", (
     .map((line) => line.trim())
     .filter((line) => line.startsWith("."))) {
     assert.match(selector, /^\.tps-linter-/, `unscoped CSS selector: ${selector}`);
+  }
+});
+
+test("retired automatic cleanup settings are never exposed to runtime", () => {
+  for (const enabled of [true, false]) {
+    const normalized = normalizeSettings({ lintOnSave: enabled, lintOnFocus: enabled });
+    assert.equal("lintOnSave" in normalized, false);
+    assert.equal("lintOnFocus" in normalized, false);
   }
 });

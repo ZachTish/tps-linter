@@ -63,7 +63,7 @@ test("local saves merge only changed fields into the latest synced payload", asy
 });
 
 test("rapid old-new-old edits persist the final local intent", async () => {
-  const baseline = createSettings({ lintOnSave: true });
+  const baseline = createSettings({ cleanWhitespaceOnlyLines: true });
   const live = cloneSettings(baseline);
   const firstRead = createDeferred<unknown>();
   const saved: Record<string, unknown>[] = [];
@@ -81,18 +81,18 @@ test("rapid old-new-old edits persist the final local intent", async () => {
   });
   persistence.setBaseline(baseline);
 
-  live.lintOnSave = false;
+  live.cleanWhitespaceOnlyLines = false;
   const firstSave = persistence.request(live);
   await Promise.resolve();
-  live.lintOnSave = true;
+  live.cleanWhitespaceOnlyLines = true;
   const secondSave = persistence.request(live);
   firstRead.resolve(baseline);
   await Promise.all([firstSave, secondSave]);
 
   assert.equal(saved.length, 2);
-  assert.equal(saved[0]?.lintOnSave, false);
-  assert.equal(saved[1]?.lintOnSave, true);
-  assert.equal(live.lintOnSave, true);
+  assert.equal(saved[0]?.cleanWhitespaceOnlyLines, false);
+  assert.equal(saved[1]?.cleanWhitespaceOnlyLines, true);
+  assert.equal(live.cleanWhitespaceOnlyLines, true);
 });
 
 test("external settings apply in place without writing them back", async () => {
@@ -109,7 +109,7 @@ test("external settings apply in place without writing them back", async () => {
   persistence.setBaseline(baseline);
   const externalRead = persistence.captureExternalRead();
   const external = createSettings({
-    lintOnSave: false,
+    cleanWhitespaceOnlyLines: false,
     excludedPaths: ["Synced/Safe"],
   });
 
@@ -119,7 +119,7 @@ test("external settings apply in place without writing them back", async () => {
   );
 
   assert.deepEqual(result, { applied: true, changed: 2 });
-  assert.equal(live.lintOnSave, false);
+  assert.equal(live.cleanWhitespaceOnlyLines, false);
   assert.deepEqual(live.excludedPaths, ["Synced/Safe"]);
   assert.equal(writes, 0);
 });
@@ -163,7 +163,7 @@ test("a queued local save owns its fields during an external reload", async () =
   });
   persistence.setBaseline(baseline);
 
-  live.lintOnSave = false;
+  live.cleanWhitespaceOnlyLines = false;
   const save = persistence.request(live);
   await Promise.resolve();
   const result = persistence.applyExternal(
@@ -172,14 +172,14 @@ test("a queued local save owns its fields during an external reload", async () =
   );
 
   assert.deepEqual(result, { applied: true, changed: 1 });
-  assert.equal(live.lintOnSave, false);
+  assert.equal(live.cleanWhitespaceOnlyLines, false);
   assert.equal(live.headingCapitalizationStyle, "off");
   read.resolve({
     ...createSettings({ headingCapitalizationStyle: "off" }),
     futureCompatibleField: "keep",
   });
   await save;
-  assert.equal(saved[0]?.lintOnSave, false);
+  assert.equal(saved[0]?.cleanWhitespaceOnlyLines, false);
   assert.equal(saved[0]?.headingCapitalizationStyle, "off");
   assert.equal(saved[0]?.futureCompatibleField, "keep");
 });
@@ -208,7 +208,7 @@ test("no-op save requests do not rewrite data.json", async () => {
 });
 
 test("a stale external read is rejected after local persistence advances", async () => {
-  const baseline = createSettings({ lintOnSave: true });
+  const baseline = createSettings({ cleanWhitespaceOnlyLines: true });
   const live = cloneSettings(baseline);
   const saved: Record<string, unknown>[] = [];
   const persistence = new TPSLinterSettingsPersistence({
@@ -221,7 +221,7 @@ test("a stale external read is rejected after local persistence advances", async
   persistence.setBaseline(baseline);
   const staleExternalRead = persistence.captureExternalRead();
 
-  live.lintOnSave = false;
+  live.cleanWhitespaceOnlyLines = false;
   await persistence.request(live);
   const result = persistence.applyExternal(
     staleExternalRead,
@@ -230,7 +230,7 @@ test("a stale external read is rejected after local persistence advances", async
 
   assert.deepEqual(result, { applied: false, changed: 0 });
   assert.equal(saved.length, 1);
-  assert.equal(live.lintOnSave, false);
+  assert.equal(live.cleanWhitespaceOnlyLines, false);
   assert.equal(
     live.headingCapitalizationStyle,
     baseline.headingCapitalizationStyle,
@@ -238,7 +238,7 @@ test("a stale external read is rejected after local persistence advances", async
 });
 
 test("external reload preserves dirty intent after a failed local save", async () => {
-  const baseline = createSettings({ lintOnSave: true });
+  const baseline = createSettings({ cleanWhitespaceOnlyLines: true });
   const live = cloneSettings(baseline);
   const external = createSettings({ headingCapitalizationStyle: "off" });
   const saved: Record<string, unknown>[] = [];
@@ -253,7 +253,7 @@ test("external reload preserves dirty intent after a failed local save", async (
   });
   persistence.setBaseline(baseline);
 
-  live.lintOnSave = false;
+  live.cleanWhitespaceOnlyLines = false;
   await assert.rejects(() => persistence.request(live));
   const result = persistence.applyExternal(
     persistence.captureExternalRead(),
@@ -261,21 +261,21 @@ test("external reload preserves dirty intent after a failed local save", async (
   );
 
   assert.deepEqual(result, { applied: true, changed: 1 });
-  assert.equal(live.lintOnSave, false);
+  assert.equal(live.cleanWhitespaceOnlyLines, false);
   assert.equal(live.headingCapitalizationStyle, "off");
 
   failWrite = false;
   live.diagnostics = true;
   await persistence.request(live);
   assert.equal(saved.length, 1);
-  assert.equal(saved[0]?.lintOnSave, false);
+  assert.equal(saved[0]?.cleanWhitespaceOnlyLines, false);
   assert.equal(saved[0]?.diagnostics, true);
   assert.equal(saved[0]?.headingCapitalizationStyle, "off");
 });
 
 test("a first save writes a complete settings record when data.json does not exist", async () => {
   const baseline = createSettings({
-    lintOnSave: false,
+    cleanWhitespaceOnlyLines: false,
     cleanFilenames: false,
     excludedPaths: ["Custom"],
   });
@@ -300,7 +300,7 @@ test("a first save writes a complete settings record when data.json does not exi
 
 test("missing established settings fail closed without a partial rewrite", async () => {
   const baseline = createSettings({
-    lintOnSave: false,
+    cleanWhitespaceOnlyLines: false,
     cleanFilenames: false,
     excludedPaths: ["Custom"],
   });
@@ -321,7 +321,7 @@ test("missing established settings fail closed without a partial rewrite", async
     /temporarily unavailable/,
   );
   assert.equal(writes, 0);
-  assert.equal(live.lintOnSave, false);
+  assert.equal(live.cleanWhitespaceOnlyLines, false);
   assert.equal(live.cleanFilenames, false);
   assert.deepEqual(live.excludedPaths, ["Custom"]);
 });
@@ -367,4 +367,22 @@ test("invalid and newer settings payloads fail closed without a write", async (t
       assert.equal(writes, 0);
     });
   }
+});
+
+test("legacy automation values survive explicit settings saves but stay outside runtime settings", async () => {
+  const raw = { ...createSettings(), lintOnSave: true, lintOnFocus: true };
+  const live = normalizeSettings(raw);
+  let saved: Record<string, unknown> | undefined;
+  const persistence = new TPSLinterSettingsPersistence({
+    loadLatest: async () => raw,
+    saveMerged: async value => { saved = value; },
+    getLiveSettings: () => live,
+  });
+  persistence.setBaseline(live, raw);
+  live.diagnostics = true;
+  await persistence.request(live);
+  assert.equal(saved?.lintOnSave, true);
+  assert.equal(saved?.lintOnFocus, true);
+  assert.equal("lintOnSave" in live, false);
+  assert.equal("lintOnFocus" in live, false);
 });
