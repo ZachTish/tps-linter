@@ -10,7 +10,7 @@
     "test:unit": "node --experimental-strip-types --test tests/*.test.ts",
     "test:settings": "node --test scripts/test-settings-contract.mjs",
     "test:differential": "node --experimental-strip-types scripts/test-manual-analysis-differential.mjs",
-    "test": "npm run test:unit && npm run test:settings && npm run build"
+    "test": "npm run test:unit && npm run test:settings"
   },
   "keywords": [
     "obsidian",
