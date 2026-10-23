@@ -1,3 +1,5 @@
+import { nativeSettingsSearch, focusSettingsSearchResult, type SettingsSearchEntry } from "./native-settings-search";
+import { SETTINGS_SEARCH_ENTRIES, SETTINGS_SEARCH_ROUTES } from "./settings-search-catalog";
 import {
   App,
   ButtonComponent,
@@ -47,6 +49,36 @@ const SETTINGS_DESTINATIONS: ReadonlyArray<{
 ];
 
 export class TPSLinterSettingTab extends PluginSettingTab {
+  private searchContentEl: HTMLElement | null = null;
+  private get settingsContentEl(): HTMLElement {
+    return this.searchContentEl?.isConnected ? this.searchContentEl : this.containerEl;
+  }
+
+  getSettingDefinitions() {
+    return nativeSettingsSearch(SETTINGS_SEARCH_ENTRIES, SETTINGS_SEARCH_ROUTES,
+      container => {
+        this.searchContentEl = container;
+        this.display();
+        return () => { this.hide(); if (this.searchContentEl === container) this.searchContentEl = null; };
+      }, entry => this.openSearchResult(entry));
+  }
+
+  private openSearchResult(entry: SettingsSearchEntry): void {
+    this.activeDestination = entry.route as SettingsDestination;
+    const manager = (this.app as App & { setting?: { openTabById?: (id: string) => void } }).setting;
+    manager?.openTabById?.(this.plugin.manifest.id);
+    this.display();
+    if (!focusSettingsSearchResult(this.settingsContentEl, entry.name)) {
+      const message = this.settingsContentEl.createDiv({
+        text: `“${entry.name}” is in this area. Its control appears when the relevant feature or saved item is selected.`,
+        attr: { role: 'status', tabindex: '-1' },
+      });
+      this.settingsContentEl.prepend(message);
+      message.focus();
+      message.scrollIntoView({ block: 'start' });
+    }
+  }
+
   private readonly plugin: TPSLinterPlugin;
   private activeDestination: SettingsDestination = "clean-notes";
   private routeButtons = new Map<SettingsDestination, HTMLButtonElement>();
@@ -58,7 +90,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
   }
 
   display(): void {
-    const { containerEl } = this;
+    const containerEl = this.settingsContentEl;
     containerEl.empty();
     containerEl.addClass("tps-linter-settings");
 
@@ -94,7 +126,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
   }
 
   refreshAfterExternalSettingsChange(): void {
-    if (!this.containerEl.isConnected) return;
+    if (!this.settingsContentEl.isConnected) return;
     this.display();
     this.statusEl?.setText(
       "Settings updated from Obsidian Sync or another external change.",
@@ -549,7 +581,7 @@ export class TPSLinterSettingTab extends PluginSettingTab {
 
   private focusSettingControl(settingName: string): void {
     const settingItems = Array.from(
-      this.containerEl.querySelectorAll(".setting-item"),
+      this.settingsContentEl.querySelectorAll(".setting-item"),
     ) as HTMLElement[];
     for (const settingItem of settingItems) {
       const name = settingItem.querySelector(

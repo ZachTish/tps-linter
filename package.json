@@ -1,16 +1,18 @@
 {
   "name": "tps-linter",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "TPS-specific note and filename cleanup for Obsidian.",
   "main": "main.js",
   "type": "module",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "build": "npm run settings:search:check && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "test:unit": "node --experimental-strip-types --test tests/*.test.ts",
     "test:settings": "node --test scripts/test-settings-contract.mjs",
     "test:differential": "node --experimental-strip-types scripts/test-manual-analysis-differential.mjs",
-    "test": "npm run test:unit && npm run test:settings"
+    "test": "node --test scripts/test-native-settings-search.mjs && npm run test:unit && npm run test:settings",
+    "settings:search": "node scripts/generate-settings-search.mjs",
+    "settings:search:check": "node scripts/generate-settings-search.mjs --check"
   },
   "keywords": [
     "obsidian",
